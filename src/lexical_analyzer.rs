@@ -18,7 +18,6 @@ impl LexicalAnalyzer<'_> {
         // let curr_token  &str=;
         // if RESERVED.contains(curr_token) {}
         let mut line_no: usize = 1;
-        let mut comment = false;
         for i in 0..source_code.len() {
             if source_code[i] == b'\n' {
                 line_no += 1;
@@ -34,13 +33,13 @@ impl LexicalAnalyzer<'_> {
         let mut res = Vec::<u8>::with_capacity(source_code.len());
         let mut line_no: usize = 1;
         let mut comment = false;
+        let mut string = false;
         let mut i: usize = 0;
         while i < source_code.len() {
             println!("INNER RES is:\n{:?}", &res);
             println!("INNER RES is:\n{}", String::from_utf8_lossy(&res));
             println!();
             if source_code[i] == b'\n' {
-                println!("Newline symbol has been encountered.");
                 res.push(b'\n');
                 line_no += 1;
                 i += 1;
@@ -53,27 +52,39 @@ impl LexicalAnalyzer<'_> {
                             return Err(generate_error_message_with_line_no(
                                 "no right operand for '/' operator", line_no));
                         }
-                        if source_code[i + 1] == b'*' {
+                        if source_code[i + 1] == b'*'
+                            && !string {
                             comment = true;
                             i += 2;
                             continue;
                         }
                     }
                     b' ' => {
-                        if i + 1 == source_code.len() {
-                            break;
+                        if !string {
+                            if i + 1 == source_code.len() {
+                                break;
+                            }
+                            // println!("PREV is {}", res[i - 1].clone());
+                            if res.is_empty() {
+                                i += 1;
+                                continue;
+                            } else if [b'\n', b' '].contains(res.last().unwrap()) {
+                                i += 1;
+                                continue;
+                            }
+                            if source_code[i + 1] == b'\n' {
+                                i += 1;
+                                continue;
+                            }
                         }
-                        // println!("PREV is {}", res[i - 1].clone());
+                    }
+                    b'"' => {
                         if res.is_empty() {
-                            i += 1;
-                            continue;
-                        } else if [b'\n', b' '].contains(res.last().unwrap()) {
-                            i += 1;
-                            continue;
+                            return Err(generate_error_message_with_line_no("expected name, found '\"'",
+                                                                           line_no));
                         }
-                        if source_code[i + 1] == b'\n' {
-                            i += 1;
-                            continue;
+                        if *res.last().unwrap() != b'*' {
+                            string = !string;
                         }
                     }
                     _ => ()
@@ -116,8 +127,24 @@ impl LexicalAnalyzer<'_> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_scanner_remove_comments() -> Result<(), String> {
+    fn lexical_analyzer_test<S, T, Z: AsRef<str>>(
+        inp: S,
+        exp_out: T,
+        panic_msg: Option<Z>,
+        scan_first: bool,
+        symbol_table: Option<&SymbolTable>,
+        compiler_options: Option<&CompilerOptions>)
+    {
+        unimplemented!();
+    }
+
+    fn scanner_test<S: AsRef<Vec<u8>>, T: AsRef<Vec<u8>>, Z: AsRef<str>>(
+        inp: S,
+        exp_out: T,
+        panic_msg: Option<Z>,
+    ) -> Result<(), String> {
+        let inp = inp.as_ref();
+        let exp_out = exp_out.as_ref();
         let st = SymbolTable::new();
         let co = CompilerOptions::default();
         let la = LexicalAnalyzer {
@@ -126,27 +153,31 @@ mod tests {
             tokens: Vec::new(),
         };
 
-        let res = la.remove_extra_whitespaces_and_comments(&Vec::<u8>::from("\
+        let res = la.remove_extra_whitespaces_and_comments(inp)?;
+        let res = &res;
+        let ans = exp_out;
+        match panic_msg {
+            None => assert_eq!(res, ans),
+            Some(msg) => assert_eq!(res, ans, "{}", msg.as_ref()),
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_scanner_remove_comments() -> Result<(), String> {
+        scanner_test(Vec::<u8>::from("\
         main() {\
         auto a, b  /* my exciting comment\
 
         */;\
         }\
-        "))?;
-        let ans = &Vec::<u8>::from("\
+        "), Vec::<u8>::from("\
 main() {\
 auto a, b \
 
 ;\
 }\
-");
-        {
-            let res = String::from_utf8_lossy(&res);
-            // let res = String::from(res);
-            println!("RES is:\n{}", res);
-        }
-        assert_eq!(&res, ans);
-        Ok(())
+"), None::<Box<str>>)
     }
 
     #[test]
@@ -159,7 +190,7 @@ auto a, b \
             tokens: Vec::new(),
         };
 
-        let res = la.remove_extra_whitespaces_and_comments(&Vec::<u8>::from("\
+        scanner_test(Vec::<u8>::from("\
         main() {
         auto   a,   b  /* my exciting comment
 
@@ -171,8 +202,7 @@ auto a, b \
         b     =    -      a;
         a = = = b;
         }
-        "))?;
-        let ans: Vec<u8> = ("\
+        "), Vec::<u8>::from("\
 main() {
 auto a, b \n".to_owned()
             + "\n"
@@ -184,8 +214,28 @@ b =- 2 ;
 b = - a;
 a = = = b;
 }
-").into_bytes();
-        assert_eq!(res, ans);
-        Ok(())
+"), None::<Box<str>>)
+    }
+
+    #[test]
+    fn test_scanner_remove_whitespaces_inside_strings() -> Result<(), String> {
+        let test_res = scanner_test(Vec::<u8>::from("\
+        main() {
+        a \"my exciting string\";
+        }"),
+                                    Vec::<u8>::from("\
+main() {
+a \"my exciting string\";
+}"),
+                                    None::<Box<str>>)?;
+
+        scanner_test(Vec::<u8>::from("\
+        main() {
+        a \"a     long    string  \";
+        }"),
+                     Vec::<u8>::from("\
+main() {
+a \"a     long    string  \";
+}"), None::<Box<str>>)
     }
 }
