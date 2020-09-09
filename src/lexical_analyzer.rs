@@ -5,7 +5,7 @@ use crate::generate_error_message_with_line_no;
 
 pub struct LexicalAnalyzer<'a> {
     pub compiler_options: &'a CompilerOptions,
-    pub tokens: Vec<Token>,
+    pub tokens: Vec<Token<'a>>,
     pub reserved: &'a SymbolTable<'a>,
 }
 
@@ -15,8 +15,6 @@ impl LexicalAnalyzer<'_> {
         source_code: &Vec<u8>,
     ) -> Result<Vec<(Token, TypeOfLineNo)>, &str> {
         let mut res = Vec::<(Token, TypeOfLineNo)>::new();
-        // let curr_token  &str=;
-        // if RESERVED.contains(curr_token) {}
         let mut line_no: usize = 1;
         for i in 0..source_code.len() {
             if source_code[i] == b'\n' {
@@ -31,14 +29,11 @@ impl LexicalAnalyzer<'_> {
         source_code: &Vec<u8>,
     ) -> Result<Vec<u8>, String> {
         let mut res = Vec::<u8>::with_capacity(source_code.len());
-        let mut line_no: usize = 1;
+        let mut line_no: TypeOfLineNo = 1;
         let mut comment = false;
         let mut string = false;
         let mut i: usize = 0;
         while i < source_code.len() {
-            println!("INNER RES is:\n{:?}", &res);
-            println!("INNER RES is:\n{}", String::from_utf8_lossy(&res));
-            println!();
             if source_code[i] == b'\n' {
                 res.push(b'\n');
                 line_no += 1;
@@ -64,7 +59,6 @@ impl LexicalAnalyzer<'_> {
                             if i + 1 == source_code.len() {
                                 break;
                             }
-                            // println!("PREV is {}", res[i - 1].clone());
                             if res.is_empty() {
                                 i += 1;
                                 continue;
@@ -103,7 +97,6 @@ impl LexicalAnalyzer<'_> {
                 }
             }
             if !comment {
-                println!("Pushing {} to res...", source_code[i].clone());
                 res.push(source_code[i]);
             }
             i += 1;

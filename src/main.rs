@@ -5,7 +5,7 @@ mod code_generator;
 use std::process;
 use std::collections::HashMap;
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub enum BracketType {
     Round,
     Curly,
@@ -18,12 +18,24 @@ pub enum LeftOrRight {
     Right,
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-pub enum Constant {
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone)]
+pub struct Bracket {
+    left_or_right: LeftOrRight,
+    bracket_type: BracketType,
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone)]
+pub enum ConstantType {
     Octal,
     Decimal,
     Char,
     String,
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone)]
+pub struct Constant<'a> {
+    value: &'a Vec<u8>,
+    constant_type: ConstantType,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
@@ -45,28 +57,31 @@ pub enum Binary {
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
-pub enum Token {
+pub enum Token<'a> {
     ExclamationMark,
     Binary(Binary),
     Assign(Option<Binary>),
     Id(Vec<u8>),
-    Constant((Constant, Vec<u8>)),
-    Bracket((BracketType, LeftOrRight)),
+    Constant(Constant<'a>),
+    Bracket(BracketType),
 }
 
 type TypeOfLineNo = usize;
-type SymbolTable<'a> = HashMap<&'a str, Token>;
+type SymbolTable<'a> = HashMap<&'a str, Token<'a>>;
 
 #[derive(Default)]
 pub struct CompilerOptions {
     pub integers_are_unsigned: bool,
 }
 
-fn generate_error_message_with_line_no(error_str: &str, line_no: TypeOfLineNo) -> String {
-    format!("Error: {}. Line: {}", error_str, line_no)
+fn generate_error_message_with_line_no<S: AsRef<str>>(
+    error_str: S,
+    line_no: TypeOfLineNo,
+) -> String {
+    format!("Error: {}. Line: {}", error_str.as_ref(), line_no)
 }
 
-fn process_command_line_args_and_return_compiler_options()
+fn process_command_line_args_to_find_out_filename_and_compiler_options()
     -> Result<(String, CompilerOptions), &'static str> {
     let args: Vec<String> = std::env::args().collect();
 
@@ -80,7 +95,7 @@ fn process_command_line_args_and_return_compiler_options()
 }
 
 fn main() {
-    let (filename, compiler_options) = process_command_line_args_and_return_compiler_options()
+    let (filename, compiler_options) = process_command_line_args_to_find_out_filename_and_compiler_options()
         .unwrap_or_else(|err| {
             eprintln!("Something went wrong parsing arguments: {}", err);
             process::exit(1);

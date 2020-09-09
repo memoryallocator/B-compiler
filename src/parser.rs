@@ -38,7 +38,10 @@ impl<'a> Parser<'a> {
         AbstractSyntaxTree::new()
     }
 
-    pub fn run(&mut self, tokens: &Vec<(Token, TypeOfLineNo)>) -> (AbstractSyntaxTree, SymbolTable) {
+    pub fn run(
+        &mut self,
+        tokens: &Vec<(Token, TypeOfLineNo)>,
+    ) -> (AbstractSyntaxTree, SymbolTable) {
         (self.generate_ast(tokens), Default::default())
     }
 }
