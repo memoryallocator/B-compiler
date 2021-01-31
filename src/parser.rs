@@ -1,4 +1,5 @@
-use crate::{CompilerOptions, Token, SymbolTable, TypeOfLineNo};
+use crate::config::{CompilerOptions, SymbolTable, TypeOfLineNo};
+use crate::token::Token;
 
 pub struct AbstractSyntaxNode<'a> {
     parent: Option<&'a AbstractSyntaxNode<'a>>,
