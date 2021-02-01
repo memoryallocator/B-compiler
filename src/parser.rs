@@ -3,16 +3,14 @@ use crate::token::Token;
 
 pub struct AbstractSyntaxNode<'a> {
     parent: Option<&'a AbstractSyntaxNode<'a>>,
-    left: Option<&'a AbstractSyntaxNode<'a>>,
-    right: Option<&'a AbstractSyntaxNode<'a>>,
+    children: Option<Vec<&'a AbstractSyntaxNode<'a>>>,
 }
 
 impl<'a> AbstractSyntaxNode<'a> {
     fn new() -> AbstractSyntaxNode<'a> {
         AbstractSyntaxNode {
             parent: None,
-            left: None,
-            right: None,
+            children: None,
         }
     }
 }

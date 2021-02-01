@@ -20,7 +20,7 @@ pub(crate) fn get_second_symbol_of_escape_sequence_to_character_mapping() -> Has
     ].into_iter().collect()
 }
 
-fn get_keywords() -> SymbolTable<'static> {
+pub(crate) fn get_keywords() -> SymbolTable {
     vec![
         ("auto", Token::DeclarationSpecifier(Auto)),
         ("extrn", Token::DeclarationSpecifier(Extrn)),
@@ -33,8 +33,8 @@ fn get_keywords() -> SymbolTable<'static> {
         ("for", Token::ControlStatement(For)),
         ("case", Token::ControlStatement(Case)),
         ("break", Token::ControlStatement(Break))
-    ].into_iter().collect()
+    ].into_iter().map(|x| (Vec::from(x.0), x.1)).collect()
 }
 
 pub(crate) type TypeOfLineNo = usize;
-pub(crate) type SymbolTable<'a> = HashMap<&'a str, Token>;
+pub(crate) type SymbolTable = HashMap<Vec<u8>, Token>;

@@ -13,8 +13,8 @@ pub enum LeftOrRight {
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
 pub struct Bracket {
-    left_or_right: LeftOrRight,
-    bracket_type: BracketType,
+    pub left_or_right: LeftOrRight,
+    pub bracket_type: BracketType,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
@@ -33,15 +33,20 @@ pub struct Constant {
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug)]
 pub enum Binary {
+    Add,
+    Sub,
+    Mul,
     Div,
     Mod,
     Eq,
     Ne,
     Le,
     Ge,
-    Lt,
-    Gt,
+    Less,
+    Greater,
     Or,
+    And,
+    Xor,
     Shift(LeftOrRight),
 }
 
@@ -79,7 +84,7 @@ pub enum Token {
     Assign(Option<Binary>),
     Id(Vec<u8>),
     Constant(Constant),
-    Bracket(BracketType),
+    Bracket(Bracket),
     Comma,
     Semicolon,
     Colon,
@@ -90,4 +95,5 @@ pub enum Token {
     Dot,
     ControlStatement(ControlStatement),
     DeclarationSpecifier(DeclarationSpecifier),
+    QuestionMark,
 }

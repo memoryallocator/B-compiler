@@ -1,10 +1,9 @@
-use std::cell::Cell;
-use std::fs::read;
-use std::iter::FromIterator;
 use std::process;
 
 use config::CompilerOptions;
 use config::TypeOfLineNo;
+
+use crate::config::{get_keywords, get_second_symbol_of_escape_sequence_to_character_mapping};
 
 mod lexical_analyzer;
 mod parser;
@@ -48,7 +47,8 @@ fn main() {
 
     let mut lexical_analyzer = lexical_analyzer::LexicalAnalyzer {
         compiler_options: &compiler_options,
-        second_symbol_of_escape_sequence_to_character_mapping: Default::default(),
+        second_symbol_of_escape_sequence_to_character_mapping: get_second_symbol_of_escape_sequence_to_character_mapping(),
+        keywords: get_keywords(),
     };
     let tokens = lexical_analyzer.run(&source_code).unwrap_or_else(
         |err| {
@@ -56,7 +56,7 @@ fn main() {
             process::exit(1);
         });
 
-    for (token, _) in tokens.clone() {
+    for token in tokens.clone() {
         dbg!(token);
     }
 
