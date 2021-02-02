@@ -37,4 +37,5 @@ pub(crate) fn get_keywords() -> SymbolTable {
 }
 
 pub(crate) type TypeOfLineNo = usize;
+pub(crate) type TypeOfColumnNo = usize;
 pub(crate) type SymbolTable = HashMap<Vec<u8>, Token>;

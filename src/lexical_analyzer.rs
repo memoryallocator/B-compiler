@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::string::String;
 
-use crate::config::{CompilerOptions, SymbolTable, TypeOfLineNo};
+use crate::config::{CompilerOptions, SymbolTable, TypeOfColumnNo, TypeOfLineNo};
 use crate::generate_error_message_with_line_no;
 use crate::token::*;
 use crate::token::ConstantType::*;
@@ -72,165 +72,169 @@ fn parse_operator<'a, I>(op: I) -> Option<(Token, usize)>
     }
 }
 
-fn ensure_right_operand_exists(s: &Vec<u8>, i: usize, line_no: TypeOfLineNo) -> Result<(), String> {
-    if i + 1 == s.len() {
-        return Err(generate_error_message_with_line_no(
-            format!("no right operand for '{}' operator", s[i] as char), line_no));
-    }
-    return Ok(());
+#[derive(Clone, Debug, PartialEq, Eq, Copy)]
+pub struct TokenPos {
+    pub line: TypeOfLineNo,
+    pub column: TypeOfColumnNo,
 }
 
 impl LexicalAnalyzer<'_> {
     fn tokenize(
-        &mut self,
+        &self,
         source_code: &Vec<u8>,
-    ) -> Result<Vec<(Token, TypeOfLineNo)>, String> {
-        let mut res = Vec::<(Token, TypeOfLineNo)>::new();
+    ) -> Result<Vec<(Token, TokenPos)>, String> {
+        let mut res = Vec::<(Token, TokenPos)>::new();
         let mut buffer = Vec::<u8>::new();
         let mut line_no: TypeOfLineNo = 1;
-        let mut char = false;
-        let mut string = false;
         let mut i: usize = 0;
+        let mut curr_line_started_at: usize = 0;
+        let mut currently_reading: Option<ConstantType> = None;
+
         while i < source_code.len() {
+            let token_pos = TokenPos { line: line_no, column: i - curr_line_started_at + 1 };
             let curr_char = source_code[i];
-            match curr_char {
-                b'\'' => {
-                    if string {
-                        buffer.push(curr_char);
-                    } else {
-                        if char {
-                            res.push((Token::Constant(Constant { constant_type: Char, value: buffer.clone() }), line_no));
-                            buffer.clear();
+            if curr_char == b'\n' {
+                curr_line_started_at = i + 1;
+                line_no += 1;
+            } else {
+                match curr_char {
+                    b'\'' | b'"' => {
+                        let this_literal_type = if curr_char == b'"' { String } else { Char };
+                        match currently_reading {
+                            None => {
+                                res.push((Token::Constant(Constant {
+                                    constant_type: this_literal_type,
+                                    value: Vec::new(),
+                                }), token_pos));
+                                currently_reading = Some(this_literal_type);
+                            }
+                            Some(currently_reading_literal_type) => {
+                                if currently_reading_literal_type != this_literal_type {
+                                    buffer.push(curr_char);
+                                } else {
+                                    let (token, _) = res.last_mut().unwrap();
+                                    *token = Token::Constant(Constant {
+                                        constant_type: this_literal_type,
+                                        value: buffer.clone(),
+                                    });
+                                    buffer.clear();
+                                    currently_reading = None;
+                                }
+                            }
                         }
-                        char = !char
                     }
-                }
-                b'"' => {
-                    if char {
-                        buffer.push(curr_char);
-                    } else {
-                        if string {
-                            res.push((Token::Constant(Constant { constant_type: String, value: buffer.clone() }), line_no));
-                            buffer.clear();
-                        }
-                        string = !string
-                    }
-                }
-                b'\n' => line_no += 1,
-                b'*' => {  // process escape sequence
-                    if let Err(s) = ensure_right_operand_exists(source_code, i, line_no) {
-                        return Err(s);
-                    }
-                    let next_char = source_code[i + 1];
-                    if !string && !char {
-                        res.push((Token::Asterisk, line_no))
-                    } else {
-                        if let Some(processed_escape_seq) = self.second_symbol_of_escape_sequence_to_character_mapping.get(&next_char) {
-                            buffer.push(*processed_escape_seq);
-                            i += 2;
-                            continue;
-                        }
-                        res.push((Token::Asterisk, line_no));
-                    }
-                }
-                _ => {
-                    if string || char {
-                        buffer.push(curr_char);
-                    } else {
-                        match curr_char {
-                            b' ' => (),
-                            b',' => res.push((Token::Comma, line_no)),
-                            b';' => res.push((Token::Semicolon, line_no)),
-                            b':' => res.push((Token::Colon, line_no)),
-                            b'a'..=b'z' | b'A'..=b'Z' => {
-                                let word: Vec<u8> = source_code[i..].iter().take_while(
-                                    |c| c.is_ascii_alphanumeric())
-                                    .cloned().collect();
-                                let word_len = word.len();
-                                if let Some(token) = self.keywords.get(&word) {
-                                    res.push((token.clone(), line_no));
-                                } else {
-                                    res.push((Token::Id(word), line_no));
-                                }
-                                i += word_len;
-                                continue;
-                            }
-                            b'0'..=b'9' => {
-                                let number_as_vec: Vec<u8> = source_code[i..].iter().take_while(
-                                    |c| c.is_ascii_digit())
-                                    .cloned().collect();
-                                let number_len = number_as_vec.len();
-                                if curr_char == b'0' {
-                                    res.push((Token::Constant(Constant {
-                                        constant_type: Octal,
-                                        value: number_as_vec,
-                                    }), line_no))
-                                } else {
-                                    res.push((Token::Constant(Constant {
-                                        constant_type: Decimal,
-                                        value: number_as_vec,
-                                    }), line_no))
-                                }
-                                i += number_len;
-                                continue;
-                            }
-                            b'(' => res.push((Token::Bracket(Bracket {
-                                left_or_right: LeftOrRight::Left,
-                                bracket_type: BracketType::Round,
-                            }), line_no)),
-                            b')' => res.push((Token::Bracket(Bracket {
-                                left_or_right: LeftOrRight::Right,
-                                bracket_type: BracketType::Round,
-                            }), line_no)),
-                            b'{' => res.push((Token::Bracket(Bracket {
-                                left_or_right: LeftOrRight::Left,
-                                bracket_type: BracketType::Curly,
-                            }), line_no)),
-                            b'}' => res.push((Token::Bracket(Bracket {
-                                left_or_right: LeftOrRight::Right,
-                                bracket_type: BracketType::Curly,
-                            }), line_no)),
-                            b'[' => res.push((Token::Bracket(Bracket {
-                                left_or_right: LeftOrRight::Left,
-                                bracket_type: BracketType::Square,
-                            }), line_no)),
-                            b']' => res.push((Token::Bracket(Bracket {
-                                left_or_right: LeftOrRight::Right,
-                                bracket_type: BracketType::Square,
-                            }), line_no)),
-                            b'+' => {
-                                if let Err(s) = ensure_right_operand_exists(source_code, i, line_no) {
-                                    return Err(s);
-                                }
-                                if source_code[i + 1] == curr_char {
-                                    res.push((Token::Unary(Unary::Increment), line_no));
-                                } else {
-                                    res.push((Token::Plus, line_no));
-                                }
-                            }
-                            b'-' => {
-                                if let Err(s) = ensure_right_operand_exists(source_code, i, line_no) {
-                                    return Err(s);
-                                }
-                                if source_code[i + 1] == curr_char {
-                                    res.push((Token::Unary(Unary::Decrement), line_no));
-                                } else {
-                                    res.push((Token::Minus, line_no));
-                                }
-                            }
-                            b'!' => res.push((Token::Unary(Unary::LogicalNot), line_no)),
-                            b'~' => res.push((Token::Unary(Unary::Complement), line_no)),
-                            b'&' => res.push((Token::Ampersand, line_no)),
-                            b'.' => res.push((Token::Dot, line_no)),
-                            b'?' => res.push((Token::QuestionMark, line_no)),
-                            _ => {
-                                if let Some((op, op_len)) = parse_operator(source_code[i..].iter()) {
-                                    res.push((op, line_no));
-                                    i += op_len;
+                    b'*' =>
+                        if let None = currently_reading {
+                            res.push((Token::Asterisk, token_pos))
+                        } else {
+                            match source_code.get(i + 1) {
+                                None => buffer.push(curr_char),
+                                Some(next_char) => {
+                                    match self.second_symbol_of_escape_sequence_to_character_mapping.get(next_char) {
+                                        None => {
+                                            buffer.push(curr_char);
+                                            buffer.push(*next_char);
+                                        }
+                                        Some(processed_escape_seq) => buffer.push(*processed_escape_seq),
+                                    }
+                                    i += 2;
                                     continue;
-                                } else {
-                                    return Err(generate_error_message_with_line_no(
-                                        format!("unknown character encountered: {}", curr_char as char), line_no));
+                                }
+                            }
+                        }
+                    _ => {
+                        if let Some(_) = currently_reading {
+                            buffer.push(curr_char);
+                        } else {
+                            match curr_char {
+                                b' ' => (),
+                                b',' => res.push((Token::Comma, token_pos)),
+                                b';' => res.push((Token::Semicolon, token_pos)),
+                                b':' => res.push((Token::Colon, token_pos)),
+                                b'a'..=b'z' | b'A'..=b'Z' => {
+                                    let word: Vec<u8> = source_code[i..].iter().take_while(
+                                        |c| c.is_ascii_alphanumeric())
+                                        .cloned().collect();
+                                    let word_len = word.len();
+                                    if let Some(token) = self.keywords.get(&word) {
+                                        res.push((token.clone(), token_pos));
+                                    } else {
+                                        res.push((Token::Id(word), token_pos));
+                                    }
+                                    i += word_len;
+                                    continue;
+                                }
+                                b'0'..=b'9' => {
+                                    let number_as_vec: Vec<u8> = source_code[i..].iter().take_while(
+                                        |c| c.is_ascii_digit())
+                                        .cloned().collect();
+                                    let number_len = number_as_vec.len();
+                                    res.push((
+                                        Token::Constant(Constant {
+                                            constant_type: if curr_char == b'0' { Octal } else { Decimal },
+                                            value: number_as_vec,
+                                        }), token_pos));
+                                    i += number_len;
+                                    continue;
+                                }
+                                b'(' => res.push((Token::Bracket(Bracket {
+                                    left_or_right: LeftOrRight::Left,
+                                    bracket_type: BracketType::Round,
+                                }), token_pos)),
+                                b')' => res.push((Token::Bracket(Bracket {
+                                    left_or_right: LeftOrRight::Right,
+                                    bracket_type: BracketType::Round,
+                                }), token_pos)),
+                                b'{' => res.push((Token::Bracket(Bracket {
+                                    left_or_right: LeftOrRight::Left,
+                                    bracket_type: BracketType::Curly,
+                                }), token_pos)),
+                                b'}' => res.push((Token::Bracket(Bracket {
+                                    left_or_right: LeftOrRight::Right,
+                                    bracket_type: BracketType::Curly,
+                                }), token_pos)),
+                                b'[' => res.push((Token::Bracket(Bracket {
+                                    left_or_right: LeftOrRight::Left,
+                                    bracket_type: BracketType::Square,
+                                }), token_pos)),
+                                b']' => res.push((Token::Bracket(Bracket {
+                                    left_or_right: LeftOrRight::Right,
+                                    bracket_type: BracketType::Square,
+                                }), token_pos)),
+                                b'+' => {
+                                    match source_code.get(i + 1) {
+                                        Some(b'+') => {
+                                            res.push((Token::Unary(Unary::Increment), token_pos));
+                                            i += 2;
+                                            continue;
+                                        }
+                                        _ => res.push((Token::Plus, token_pos))
+                                    }
+                                }
+                                b'-' => {
+                                    match source_code.get(i + 1) {
+                                        Some(b'-') => {
+                                            res.push((Token::Unary(Unary::Decrement), token_pos));
+                                            i += 2;
+                                            continue;
+                                        }
+                                        _ => res.push((Token::Minus, token_pos))
+                                    }
+                                }
+                                b'!' => res.push((Token::Unary(Unary::LogicalNot), token_pos)),
+                                b'~' => res.push((Token::Unary(Unary::Complement), token_pos)),
+                                b'&' => res.push((Token::Ampersand, token_pos)),
+                                b'.' => res.push((Token::Dot, token_pos)),
+                                b'?' => res.push((Token::QuestionMark, token_pos)),
+                                _ => {
+                                    if let Some((op, op_len)) = parse_operator(source_code[i..].iter()) {
+                                        res.push((op, token_pos));
+                                        i += op_len;
+                                        continue;
+                                    } else {
+                                        return Err(generate_error_message_with_line_no(
+                                            format!("unknown character encountered: {}", curr_char as char), line_no));
+                                    }
                                 }
                             }
                         }
@@ -238,6 +242,12 @@ impl LexicalAnalyzer<'_> {
                 }
             }
             i += 1;
+        }
+        if let Some(t) = currently_reading {
+            let literal = if t == Char { '\'' } else { '"' };
+            return Err(generate_error_message_with_line_no(
+                format!("expected {} (opening literal found in line {}, column {}), found end of file",
+                        literal, res.last().unwrap().1.line, res.last().unwrap().1.column), line_no));
         }
         Ok(res)
     }
@@ -252,51 +262,72 @@ impl LexicalAnalyzer<'_> {
         let mut char = false;
         let mut string = false;
         let mut i: usize = 0;
+        let mut curr_line_started_at: usize = 0;
+        let mut opening_literal_pos: Option<TokenPos> = None;
+
         while i < source_code.len() {
-            if source_code[i] == b'\n' {
+            let curr_char = source_code[i];
+            if curr_char == b'\n' {
+                res.push(curr_char);
                 line_no += 1;
+                curr_line_started_at = i + 1;
+                i += 1;
+                continue;
             }
             if !comment {
-                match source_code[i] {
-                    b'\'' => {
-                        if res.is_empty() || *res.last().unwrap() != b'*' {
+                match curr_char {
+                    b'\'' =>
+                        if !string && *res.last().unwrap_or(&b'\0') != b'*' {
+                            if !char {
+                                opening_literal_pos = Some(TokenPos {
+                                    line: line_no,
+                                    column: i - curr_line_started_at + 1,
+                                })
+                            }
                             char = !char;
                         }
-                    }
-                    b'"' => {
-                        if res.is_empty() || *res.last().unwrap() != b'*' {
+                    b'"' =>
+                        if !char && *res.last().unwrap_or(&b'\0') != b'*' {
+                            if !string {
+                                opening_literal_pos = Some(TokenPos {
+                                    line: line_no,
+                                    column: i - curr_line_started_at + 1,
+                                });
+                            }
                             string = !string;
                         }
-                    }
-                    b'/' => {
-                        if let Err(s) = ensure_right_operand_exists(source_code, i, line_no) {
-                            return Err(s);
+                    b'/' =>
+                        if !string && !char {
+                            if let Some(b'*') = source_code.get(i + 1) {
+                                comment = true;
+                                i += 2;
+                                continue;
+                            }
                         }
-                        if source_code[i + 1] == b'*'
-                            && !string {
-                            comment = true;
-                            i += 2;
-                            continue;
-                        }
-                    }
                     _ => ()
                 }
             } else {  // currently reading a comment
-                if source_code[i] == b'*' {
-                    if let Err(s) = ensure_right_operand_exists(source_code, i, line_no) {
-                        return Err(s);
-                    }
-                    if source_code[i + 1] == b'/' {
+                if curr_char == b'*' {
+                    if let Some(b'/') = source_code.get(i + 1) {
                         comment = false;
                         i += 2;
                         continue;
                     }
                 }
             }
-            if !comment || source_code[i] == b'\n' {
+            if !comment {
                 res.push(source_code[i]);
             }
             i += 1;
+        }
+        if comment {
+            return Err(generate_error_message_with_line_no("expected */, found end of file", line_no));
+        }
+        if char || string {
+            let literal = if char { '\'' } else { '"' };
+            return Err(generate_error_message_with_line_no(
+                format!("expected {} (opening literal found in line {}, column {}), found end of file",
+                        literal, opening_literal_pos.unwrap().line, opening_literal_pos.unwrap().column), line_no));
         }
         res.shrink_to_fit();
         Ok(res)
@@ -305,7 +336,7 @@ impl LexicalAnalyzer<'_> {
     pub fn run(
         &mut self,
         source_code: &Vec<u8>,
-    ) -> Result<Vec<(Token, TypeOfLineNo)>, String> {
+    ) -> Result<Vec<(Token, TokenPos)>, String> {
         let source_code = self.remove_comments(source_code)?;
         Ok(self.tokenize(&source_code)?)
     }
@@ -320,7 +351,7 @@ mod tests {
 
     fn lexical_analyzer_test<S: AsRef<Vec<u8>>, Z: AsRef<str>>(
         inp: S,
-        exp_out: Result<&Vec<(Token, TypeOfLineNo)>, String>,
+        exp_out: Result<&Vec<(Token, TokenPos)>, String>,
         panic_msg: Option<Z>,
         scan_first: bool,
         compiler_options: &CompilerOptions,

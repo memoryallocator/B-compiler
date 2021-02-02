@@ -1,9 +1,8 @@
 use std::process;
 
-use config::CompilerOptions;
-use config::TypeOfLineNo;
-
 use crate::config::{get_keywords, get_second_symbol_of_escape_sequence_to_character_mapping};
+use crate::config::CompilerOptions;
+use crate::config::TypeOfLineNo;
 
 mod lexical_analyzer;
 mod parser;
@@ -15,7 +14,7 @@ fn generate_error_message_with_line_no<S: AsRef<str>>(
     error_str: S,
     line_no: TypeOfLineNo,
 ) -> String {
-    format!("Error: {}. Line: {}", error_str.as_ref(), line_no)
+    format!("Error: {}. Line: {}", error_str.as_ref(), line_no.to_string())
 }
 
 fn process_command_line_args_to_get_filename_and_compiler_options()
@@ -62,7 +61,12 @@ fn main() {
 
     let mut parser = parser::Parser {
         compiler_options: &compiler_options,
-        syntax_tree: parser::AbstractSyntaxTree::new(),
+        source_code: Some(&source_code),
+        symbol_table: &get_keywords(),
     };
-    let syntax_tree = parser.run(&tokens);
+    let (syntax_tree, symbol_table) = parser.run(&tokens).unwrap_or_else(
+        |err| {
+            eprintln!("Parser returned an error: {}", err);
+            process::exit(1);
+        });
 }

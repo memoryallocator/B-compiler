@@ -17,7 +17,7 @@ pub struct Bracket {
     pub bracket_type: BracketType,
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug, Copy)]
 pub enum ConstantType {
     Octal,
     Decimal,
