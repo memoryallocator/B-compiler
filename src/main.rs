@@ -17,7 +17,7 @@ fn generate_error_message_with_line_no<S: AsRef<str>>(
     format!("Error: {}. Line: {}", error_str.as_ref(), line_no.to_string())
 }
 
-fn process_command_line_args_to_get_filename_and_compiler_options()
+fn process_command_line_arguments()
     -> Result<(String, CompilerOptions), &'static str> {
     let args: Vec<String> = std::env::args().collect();
 
@@ -33,7 +33,7 @@ fn process_command_line_args_to_get_filename_and_compiler_options()
 }
 
 fn main() {
-    let (filename, compiler_options) = process_command_line_args_to_get_filename_and_compiler_options()
+    let (filename, compiler_options) = process_command_line_arguments()
         .unwrap_or_else(|err| {
             eprintln!("Something went wrong parsing arguments: {}", err);
             process::exit(1);

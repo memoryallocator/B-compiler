@@ -49,28 +49,23 @@ impl<'a> Parser<'a> {
 
     fn are_brackets_balanced<'b, I>(mut tok_it: I) -> BracketsStatus
         where I: Iterator<Item=&'b (Token, TokenPos)> {
+        use LeftOrRight::*;
+
         let mut stack = Vec::<(&Bracket, &TokenPos)>::new();
         while let Some(token) = tok_it.next() {
-            match token {
-                (Token::Bracket(bracket), pos) =>
-                    match bracket {
-                        Bracket { left_or_right: LeftOrRight::Left, bracket_type: _ } => {
-                            stack.push((bracket, pos));
-                        }
-                        Bracket { left_or_right: LeftOrRight::Right, bracket_type: right_bracket_type } => {
-                            if let Some((Bracket {
-                                left_or_right: LeftOrRight::Left,
-                                bracket_type: left_bracket_type
-                            }, _)) = stack.last() {
-                                if left_bracket_type == right_bracket_type {
-                                    stack.pop();
-                                    continue;
-                                }
+            if let (Token::Bracket(bracket), pos) = token {
+                if bracket.left_or_right == Left {
+                    stack.push((bracket, pos));
+                } else {
+                    match stack.pop() {
+                        None => return BracketsStatus::NotOpened(pos.clone()),
+                        Some((last, _)) => {
+                            if *last != Bracket::paired_bracket(&bracket) {
+                                return BracketsStatus::NotOpened(pos.clone());
                             }
-                            return BracketsStatus::NotOpened(pos.clone());
                         }
                     }
-                _ => ()
+                }
             }
         }
         if stack.is_empty() {

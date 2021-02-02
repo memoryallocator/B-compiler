@@ -1,20 +1,58 @@
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
 pub enum BracketType {
     Round,
     Curly,
     Square,
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
 pub enum LeftOrRight {
     Left,
     Right,
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
 pub struct Bracket {
     pub left_or_right: LeftOrRight,
     pub bracket_type: BracketType,
+}
+
+impl Bracket {
+    pub fn paired_bracket(b: &Bracket) -> Bracket {
+        use LeftOrRight::*;
+
+        Bracket {
+            left_or_right: if b.left_or_right == Left { Right } else { Left },
+            bracket_type: b.bracket_type,
+        }
+    }
+
+    pub fn from(c: char) -> Option<Bracket> {
+        use LeftOrRight::*;
+        use BracketType::*;
+
+        match c {
+            '(' | '[' | '{' => Some(Bracket {
+                left_or_right: Left,
+                bracket_type: match c {
+                    '(' => Round,
+                    '[' => Square,
+                    '{' => Curly,
+                    _ => unimplemented!()
+                },
+            }),
+            ')' | ']' | '}' => Some(Bracket {
+                left_or_right: Right,
+                bracket_type: match c {
+                    ')' => Round,
+                    ']' => Square,
+                    '}' => Curly,
+                    _ => unimplemented!()
+                },
+            }),
+            _ => None
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug, Copy)]
