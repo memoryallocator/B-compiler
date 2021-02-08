@@ -1,6 +1,6 @@
 use std::process;
 
-use crate::config::{get_keywords, get_second_symbol_of_escape_sequence_to_character_mapping};
+use crate::config::{get_default_symbols, get_second_symbol_of_escape_sequence_to_character_mapping};
 use crate::config::CompilerOptions;
 use crate::config::TypeOfLineNo;
 
@@ -9,6 +9,8 @@ mod parser;
 mod code_generator;
 mod config;
 mod token;
+mod grammar;
+mod symbol;
 
 fn generate_error_message_with_line_no<S: AsRef<str>>(
     error_str: S,
@@ -46,8 +48,8 @@ fn main() {
 
     let mut lexical_analyzer = lexical_analyzer::LexicalAnalyzer {
         compiler_options: &compiler_options,
-        second_symbol_of_escape_sequence_to_character_mapping: get_second_symbol_of_escape_sequence_to_character_mapping(),
-        keywords: get_keywords(),
+        second_symbol_of_escape_sequence_to_character_mapping: &get_second_symbol_of_escape_sequence_to_character_mapping(),
+        keywords: &get_default_symbols(),
     };
     let tokens = lexical_analyzer.run(&source_code).unwrap_or_else(
         |err| {
@@ -55,18 +57,16 @@ fn main() {
             process::exit(1);
         });
 
-    for token in tokens.clone() {
-        dbg!(token);
-    }
-
     let mut parser = parser::Parser {
         compiler_options: &compiler_options,
         source_code: Some(&source_code),
-        symbol_table: &get_keywords(),
+        symbol_table: &get_default_symbols(),
     };
     let (syntax_tree, symbol_table) = parser.run(&tokens).unwrap_or_else(
         |err| {
             eprintln!("Parser returned an error: {}", err);
             process::exit(1);
         });
+
+    dbg!(&syntax_tree);
 }
