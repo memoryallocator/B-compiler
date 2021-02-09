@@ -264,11 +264,23 @@ struct VariableDefinitionNode {
 }
 
 #[derive(Debug)]
+struct IvalNode {
+    parent: Option<Weak<AbstractSyntaxNode>>,
+    value: Box<AbstractSyntaxNode>,
+}
+
+#[derive(Debug)]
+struct IvalListNode {
+    parent: Option<Weak<AbstractSyntaxNode>>,
+    values: Vec<Box<IvalNode>>,
+}
+
+#[derive(Debug)]
 struct VectorDefinitionNode {
     parent: Option<Weak<AbstractSyntaxNode>>,
     name: NameNode,
     specified_element_count: Option<Box<AbstractSyntaxNode>>,
-    values: Option<Vec<Box<AbstractSyntaxNode>>>,
+    values: Option<IvalListNode>,
 }
 
 #[derive(Debug)]
@@ -339,8 +351,15 @@ struct ConditionalStatementNode {
 }
 
 #[derive(Debug)]
-struct DefinitionsNode {
+struct ProgramNode {
     children: Vec<Box<AbstractSyntaxNode>>,
+}
+
+#[derive(Debug)]
+struct FunctionCallNode {
+    parent: Option<Weak<AbstractSyntaxNode>>,
+    function: Box<AbstractSyntaxNode>,
+    parameter_list: Vec<Box<AbstractSyntaxNode>>,
 }
 
 #[derive(Debug)]
@@ -355,8 +374,11 @@ enum AbstractSyntaxNode {
     VectorElement(VectorElementNode),
     Declaration(DeclarationNode),
     Definition(DefinitionNode),
-    Definitions(DefinitionsNode),
+    Program(ProgramNode),
     Name(NameNode),
+    Ival(IvalNode),
+    IvalList(IvalListNode),
+    FunctionCall(FunctionCallNode),
 }
 
 struct DummyNode {
@@ -435,9 +457,7 @@ impl grammar::Grammar {
     ) -> Result<ParseNonTerminalSuccess, String> {
         use grammar::*;
 
-        dbg!(nt);
         for prod in self.productions_table.get(nt).unwrap_or(&vec![]).into_iter() {
-            dbg!(prod);
             let mut matched = Vec::<MatchedGrammarSymbol>::new();
             let mut i: usize = 0;
             for prod_symbol in prod {
@@ -487,14 +507,13 @@ impl grammar::Grammar {
             if matched.len() != prod.len() {
                 continue;
             }
-            dbg!(&matched);
             let res = match nt {
-                NonTerminal::Definitions => {
+                NonTerminal::Program => {
                     if let Some(MatchedGrammarSymbol::Other) = matched.last() {
                         matched.pop();
                     }
-                    AbstractSyntaxNode::Definitions(
-                        DefinitionsNode {
+                    AbstractSyntaxNode::Program(
+                        ProgramNode {
                             children: matched.into_iter()
                                 .map(|x| match x {
                                     MatchedGrammarSymbol::NonTerminal(x) => Box::new(x.value),
@@ -509,37 +528,28 @@ impl grammar::Grammar {
                             let name_node;
                             let value;
                             match prod.len() {
-                                2 => {
+                                2 => {  // name ;
                                     value = None;
                                     matched.pop();  // drop semicolon
-                                    if let MatchedGrammarSymbol::NonTerminal(x) = matched.pop().unwrap() {
-                                        if let AbstractSyntaxNode::Name(nn) = x.value {
-                                            name_node = nn;
-                                        } else {
-                                            unreachable!();
-                                        }
-                                    } else {
-                                        unreachable!();
-                                    }
                                 }
-                                3 => {
+                                3 => {  // name value ;
                                     matched.pop();  // drop semicolon
                                     if let MatchedGrammarSymbol::NonTerminal(x) = matched.pop().unwrap() {
                                         value = Some(Box::new(x.value));
                                     } else {
                                         unreachable!()
                                     }
-                                    if let MatchedGrammarSymbol::NonTerminal(x) = matched.pop().unwrap() {
-                                        if let AbstractSyntaxNode::Name(nn) = x.value {
-                                            name_node = nn;
-                                        } else {
-                                            unreachable!();
-                                        }
-                                    } else {
-                                        unreachable!();
-                                    }
                                 }
                                 _ => unreachable!()
+                            }
+                            if let MatchedGrammarSymbol::NonTerminal(
+                                MatchedNonTerminal {
+                                    value: AbstractSyntaxNode::Name(nn),
+                                    ..
+                                }) = matched.pop().unwrap() {
+                                name_node = nn;
+                            } else {
+                                unreachable!();
                             }
                             AbstractSyntaxNode::Definition(
                                 DefinitionNode::VariableDefinition(
@@ -547,12 +557,111 @@ impl grammar::Grammar {
                                         parent: None,
                                         name: name_node,
                                         value,
-                                    }))
+                                    }
+                                )
+                            )
                         }
 
                         DataType::Vector => {
-                            unimplemented!()
+                            let name_node;
+                            let specified_element_count;
+                            let values;
+                            match prod.len() {
+                                4 => {  // name [] ;
+                                    matched.pop();  // drop semicolon
+                                    matched.pop();  // drop right bracket
+                                    specified_element_count = None;
+                                    matched.pop();  // drop left bracket
+                                    values = None;
+                                }
+                                5 => {  // name [constant] | name [] ival_list ;
+                                    matched.pop();  // drop semicolon
+                                    match matched.pop() {
+                                        Some(m) => {
+                                            match m {
+                                                MatchedGrammarSymbol::NonTerminal(
+                                                    non_term
+                                                ) =>
+                                                    match non_term.value {
+                                                        AbstractSyntaxNode::IvalList(ival_list) => {
+                                                            matched.pop();  // drop right bracket
+                                                            specified_element_count = None;
+                                                            matched.pop();  // drop left bracket
+                                                            values = Some(ival_list);
+                                                        }
+                                                        _ => unreachable!()
+                                                    }
+
+                                                MatchedGrammarSymbol::Terminal(
+                                                    MatchedTerminal {
+                                                        terminal_type: TokenType::Character(token::Character::Bracket(_)),
+                                                        ..
+                                                    }
+                                                ) =>
+                                                    match matched.pop() {
+                                                        Some(MatchedGrammarSymbol::NonTerminal(
+                                                                 MatchedNonTerminal {
+                                                                     non_terminal_type: NonTerminal::Constant,
+                                                                     value: c
+                                                                 })) => {
+                                                            specified_element_count = Some(Box::new(c));
+                                                            matched.pop();  // drop left bracket
+                                                            values = None;
+                                                        }
+                                                        _ => unreachable!()
+                                                    }
+                                                _ => unreachable!()
+                                            }
+                                        }
+                                        _ => unreachable!(),
+                                    }
+                                }
+
+                                6 => {  // name [constant] IvalList ;
+                                    matched.pop();  // drop semicolon
+                                    if let Some(MatchedGrammarSymbol::NonTerminal(
+                                                    MatchedNonTerminal {
+                                                        value: AbstractSyntaxNode::IvalList(ival_list), ..
+                                                    })) = matched.pop() {
+                                        values = Some(ival_list);
+                                    } else {
+                                        unreachable!()
+                                    }
+                                    matched.pop();  // drop right bracket
+                                    if let MatchedGrammarSymbol::NonTerminal(
+                                        MatchedNonTerminal {
+                                            non_terminal_type: NonTerminal::Constant,
+                                            value: v
+                                        }) = matched.pop().unwrap() {
+                                        specified_element_count = Some(Box::new(v));
+                                    } else {
+                                        unreachable!()
+                                    }
+                                    matched.pop();  // drop left bracket
+                                }
+                                _ => unreachable!()
+                            }
+                            if let MatchedGrammarSymbol::NonTerminal(
+                                MatchedNonTerminal {
+                                    value: AbstractSyntaxNode::Name(nn),
+                                    ..
+                                }) = matched.pop().unwrap() {
+                                name_node = nn;
+                            } else {
+                                unreachable!();
+                            }
+                            AbstractSyntaxNode::Definition(
+                                DefinitionNode::VectorDefinition(
+                                    VectorDefinitionNode {
+                                        parent: None,
+                                        name: name_node,
+                                        specified_element_count,
+                                        values,
+                                    }
+                                )
+                            )
                         }
+
                         DataType::Function => {
                             unimplemented!()
                         }
@@ -596,12 +705,63 @@ impl grammar::Grammar {
                         MatchedGrammarSymbol::NonTerminal(non_term) =>
                             {
                                 match non_term.non_terminal_type {
-                                    NonTerminal::Constant | NonTerminal::Name => non_term.value,
+                                    NonTerminal::Constant | NonTerminal::Name =>
+                                        AbstractSyntaxNode::Ival(IvalNode {
+                                            parent: None,
+                                            value: Box::new(non_term.value),
+                                        }),
                                     _ => unreachable!()
                                 }
                             }
                         _ => unreachable!()
                     }
+                }
+                NonTerminal::IvalList => {
+                    let values: Vec<Box<IvalNode>>;
+                    match prod.len() {
+                        1 =>
+                            if let Some(MatchedGrammarSymbol::NonTerminal(
+                                            MatchedNonTerminal {
+                                                non_terminal_type: NonTerminal::Ival,
+                                                value: AbstractSyntaxNode::Ival(ival_node)
+                                            }
+                                        )) = matched.pop() {
+                                values = vec![Box::new(ival_node)]
+                            } else {
+                                unreachable!()
+                            }
+                        3 =>
+                            values = matched.into_iter()
+                                .enumerate()
+                                .filter_map(
+                                    |(i, x)| if i % 2 == 0 {
+                                        match x {
+                                            MatchedGrammarSymbol::NonTerminal(
+                                                MatchedNonTerminal {
+                                                    non_terminal_type: NonTerminal::IvalList,
+                                                    value: AbstractSyntaxNode::IvalList(ival_list)
+                                                }
+                                            ) => Some(ival_list.values),
+                                            MatchedGrammarSymbol::NonTerminal(
+                                                MatchedNonTerminal {
+                                                    non_terminal_type: NonTerminal::Ival,
+                                                    value: AbstractSyntaxNode::Ival(ival_node)
+                                                }
+                                            ) => Some(vec![Box::new(ival_node)]),
+                                            _ => unreachable!()
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                ).flatten().collect(),
+                        _ => unimplemented!()
+                    }
+                    AbstractSyntaxNode::IvalList(
+                        IvalListNode {
+                            parent: None,
+                            values,
+                        }
+                    )
                 }
                 _ => unimplemented!()
             };
@@ -613,8 +773,10 @@ impl grammar::Grammar {
         return Err("failed to proceed".to_string());
     }
 
-    fn recursive_descent(&self, tokens_with_pos: &[(token::Token, TokenPos)]) -> Result<AbstractSyntaxTree,
-        String> {
+    fn recursive_descent(
+        &self,
+        tokens_with_pos: &[(token::Token, TokenPos)],
+    ) -> Result<AbstractSyntaxTree, String> {
         if tokens_with_pos.is_empty() {
             return Err("an input of recursive descent method is empty".parse().unwrap());
         }
@@ -709,14 +871,14 @@ impl Parser<'_> {
         }
 
         let productions_table: grammar::ProductionsTable =
-            vec![(NonTerminal::Definitions,
+            vec![(NonTerminal::Program,
                   vec![
                       vec![GrammarSymbol::NonTerminal(NonTerminal::Definition(Variable)),
-                           GrammarSymbol::NonTerminal(NonTerminal::Definitions)],
+                           GrammarSymbol::NonTerminal(NonTerminal::Program)],
                       vec![GrammarSymbol::NonTerminal(NonTerminal::Definition(Vector)),
-                           GrammarSymbol::NonTerminal(NonTerminal::Definitions)],
+                           GrammarSymbol::NonTerminal(NonTerminal::Program)],
                       vec![GrammarSymbol::NonTerminal(NonTerminal::Definition(Function)),
-                           GrammarSymbol::NonTerminal(NonTerminal::Definitions)],
+                           GrammarSymbol::NonTerminal(NonTerminal::Program)],
                       vec![GrammarSymbol::RightEndmarker]
                   ]),
                  (NonTerminal::Definition(Variable),
@@ -751,14 +913,26 @@ impl Parser<'_> {
                                token::Character::Bracket(Bracket::from(b'[' as char).unwrap()))),
                            GrammarSymbol::Terminal(TokenType::Character(
                                token::Character::Bracket(Bracket::from(b']' as char).unwrap()))),
-                           GrammarSymbol::NonTerminal(NonTerminal::IvalList)],
+                           GrammarSymbol::NonTerminal(NonTerminal::IvalList),
+                           GrammarSymbol::Terminal(TokenType::Character(
+                               token::Character::Punctuation(token::PunctuationSymbol::Semicolon)))],
                       vec![GrammarSymbol::NonTerminal(NonTerminal::Name),
                            GrammarSymbol::Terminal(TokenType::Character(
                                token::Character::Bracket(Bracket::from(b'[' as char).unwrap()))),
                            GrammarSymbol::NonTerminal(NonTerminal::Constant),
                            GrammarSymbol::Terminal(TokenType::Character(
                                token::Character::Bracket(Bracket::from(b']' as char).unwrap()))),
-                           GrammarSymbol::NonTerminal(NonTerminal::IvalList)]
+                           GrammarSymbol::NonTerminal(NonTerminal::IvalList),
+                           GrammarSymbol::Terminal(TokenType::Character(
+                               token::Character::Punctuation(token::PunctuationSymbol::Semicolon)))]
+                  ]),
+                 (NonTerminal::IvalList,
+                  vec![
+                      vec![GrammarSymbol::NonTerminal(NonTerminal::Ival),
+                           GrammarSymbol::Terminal(TokenType::Character(
+                               token::Character::Punctuation(token::PunctuationSymbol::Comma))),
+                           GrammarSymbol::NonTerminal(NonTerminal::IvalList)],
+                      vec![GrammarSymbol::NonTerminal(NonTerminal::Ival)],
                   ]),
                  (NonTerminal::Ival,
                   vec![
@@ -767,8 +941,8 @@ impl Parser<'_> {
                   ]),
                  (NonTerminal::Constant,
                   vec![
-                      vec![GrammarSymbol::Terminal(TokenType::Constant(Constant::Octal))],
                       vec![GrammarSymbol::Terminal(TokenType::Constant(Constant::Decimal))],
+                      vec![GrammarSymbol::Terminal(TokenType::Constant(Constant::Octal))],
                       vec![GrammarSymbol::Terminal(TokenType::Constant(Constant::Char))],
                       vec![GrammarSymbol::Terminal(TokenType::Constant(Constant::String))],
                   ]),
@@ -779,7 +953,7 @@ impl Parser<'_> {
             ].into_iter().collect();
 
         let grammar = grammar::Grammar {
-            start_symbol: NonTerminal::Definitions,
+            start_symbol: NonTerminal::Program,
             productions_table,
         };
 

@@ -42,7 +42,7 @@ pub(crate) enum DeclarationType {
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum NonTerminal {
-    Definitions,
+    Program,
     Definition(DataType),
     Declaration(DeclarationType),
     And(And),
