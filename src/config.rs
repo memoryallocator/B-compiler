@@ -5,29 +5,83 @@ use crate::token::ControlStatementIdentifier::*;
 use crate::token::DeclarationSpecifier::*;
 use crate::token::TokenType;
 
-#[derive(Default)]
-pub(crate) struct CompilerOptions {}
+pub(crate) enum Arch {
+    x86_32,
+    x86_64,
+}
 
-pub(crate) fn get_second_symbol_of_escape_sequence_to_character_mapping() -> HashMap<u8, u8> {
+pub(crate) enum PlatformName {
+    Linux,
+    Bsd,
+    Windows,
+    MacOs,
+}
+
+pub(crate) struct TargetPlatform {
+    platform_name: PlatformName,
+    pub(crate) arch: Arch,
+}
+
+impl Default for TargetPlatform {
+    fn default() -> Self {
+        Self {
+            platform_name: {
+                #[cfg(any(
+                target_os = "freebsd",
+                target_os = "dragonfly",
+                target_os = "openbsd",
+                target_os = "netbsd"
+                ))] {
+                    PlatformName::Bsd
+                }
+                #[cfg(target_os = "linux")] {
+                    PlatformName::Linux
+                }
+                #[cfg(target_os = "windows")] {
+                    PlatformName::Windows
+                }
+                #[cfg(target_os = "macos")] {
+                    PlatformName::MacOs
+                }
+            },
+            arch: {
+                #[cfg(target_pointer_width = "32")] {
+                    Arch::x86_32
+                }
+                #[cfg(target_pointer_width = "64")] {
+                    Arch::x86_64
+                }
+            },
+        }
+        // eprintln!("Unknown platform. Assuming it's 64-bit Linux")
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct CompilerOptions {
+    pub(crate) target_platform: TargetPlatform,
+}
+
+pub(crate) fn get_second_symbol_of_escape_sequence_to_character_mapping() -> HashMap<char, char> {
     vec![
-        (b'0', b'\0'),
-        (b'e', 4),  // ASCII EOT, B end of string),
-        (b'(', b'{'),
-        (b')', b'}'),
-        (b't', b'\t'),
-        (b'*', b'*'),
-        (b'"', b'"'),
-        (b'n', b'\n')
+        ('0', '\0'),
+        ('e', 4 as char),  // ASCII EOT, B end of string),
+        ('(', '{'),
+        (')', '}'),
+        ('t', '\t'),
+        ('*', '*'),
+        ('"', '"'),
+        ('n', '\n')
     ].into_iter().collect()
 }
 
 pub(crate) type TypeOfLineNo = usize;
 pub(crate) type TypeOfColumnNo = usize;
-pub(crate) type SymbolTable = HashMap<Vec<u8>, SymbolType>;
+pub(crate) type SymbolTable = HashMap<String, SymbolType>;
 
 pub(crate) fn get_default_symbols() -> SymbolTable {
     use SymbolType::*;
-    use crate::symbol::ParameterListLength;
+    // use std::ops::RangeInclusive;
 
     let mut res = Vec::<(&str, SymbolType)>::new();
     {
@@ -41,8 +95,8 @@ pub(crate) fn get_default_symbols() -> SymbolTable {
             ("if", SymbolType::Reserved(TokenType::ControlStatement(If))),
             ("else", SymbolType::Reserved(TokenType::ControlStatement(Else))),
             ("while", SymbolType::Reserved(TokenType::ControlStatement(While))),
-            // ("for", SymbolType::Reserved(TokenType::ControlStatement(For))),
             ("break", SymbolType::Reserved(TokenType::ControlStatement(Break))),
+            // ("for", SymbolType::Reserved(TokenType::ControlStatement(For))),
         ];
         res.append(&mut keywords);
     }
@@ -59,12 +113,21 @@ pub(crate) fn get_default_symbols() -> SymbolTable {
             ("close", 1),
             ("flush", 0),
             ("reread", 0)
-        ].into_iter().map(|x| (x.0, Function(ParameterListLength::Precise(x.1)))).collect();
+        ].into_iter().map(|x| (x.0, SymbolType::Function {
+            par_list_len: Some(x.1..=x.1),
+            first_decl: None,
+        })).collect();
 
-        let printf = ("printf", Function(ParameterListLength::Variable(Some(1..=11))));
+        let printf = ("printf", SymbolType::Function {
+            par_list_len: Some(1..=11),
+            first_decl: None,
+        });
         res.append(&mut io_routines_without_printf);
         res.push(printf);
-        res.push(("ioerrors", Function(ParameterListLength::Precise(1))));
+        res.push(("ioerrors", SymbolType::Function {
+            par_list_len: Some(1..=1),
+            first_decl: None,
+        }));
     }
 
     {
@@ -72,9 +135,15 @@ pub(crate) fn get_default_symbols() -> SymbolTable {
             ("char", 2),
             ("lchar", 3),
             ("getarg", 3),
-        ].into_iter().map(|x| (x.0, Function(ParameterListLength::Precise(x.1)))).collect();
+        ].into_iter().map(|x| (x.0, SymbolType::Function {
+            par_list_len: Some(x.1..=x.1),
+            first_decl: None,
+        })).collect();
 
-        str_manip.push(("concat", Function(ParameterListLength::Variable(Some(1..=11)))));
+        str_manip.push(("concat", SymbolType::Function {
+            par_list_len: Some(1..=11),
+            first_decl: None,
+        }));
         res.append(&mut str_manip);
     }
 
@@ -84,9 +153,12 @@ pub(crate) fn get_default_symbols() -> SymbolTable {
             ("rlsevec", 2),
             ("nargs", 0),
             ("exit", 0)
-        ].into_iter().map(|x| (x.0, Function(ParameterListLength::Precise(x.1)))).collect();
+        ].into_iter().map(|x| (x.0, SymbolType::Function {
+            par_list_len: Some(x.1..=x.1),
+            first_decl: None,
+        })).collect();
         res.append(&mut other_functions);
     }
 
-    res.into_iter().map(|x| (Vec::from(x.0), x.1)).collect()
+    res.into_iter().map(|x| (x.0.to_string(), x.1)).collect()
 }

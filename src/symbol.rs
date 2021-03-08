@@ -1,12 +1,7 @@
 use std::ops::RangeInclusive;
 
+use crate::lexical_analyzer::TokenPos;
 use crate::token::{DeclarationSpecifier, TokenType};
-
-#[derive(Clone)]
-pub(crate) enum ParameterListLength {
-    Precise(usize),
-    Variable(Option<RangeInclusive<usize>>),
-}
 
 // pub(crate) enum Declared {
 //     Parameter,
@@ -14,17 +9,23 @@ pub(crate) enum ParameterListLength {
 //     Auto
 // }
 
-#[derive(Clone)]
-pub(crate) struct VectorInfo {
-    declaration_specifier: DeclarationSpecifier,
-    size: usize,
-}
-
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) enum SymbolType {
-    Variable,
-    Vector(VectorInfo),
-    Function(ParameterListLength),
-    Label,
+    Variable {
+        declaration_specifier: Option<DeclarationSpecifier>,
+        first_occurrence: Option<TokenPos>,
+    },
+    Vector {
+        declaration_specifier: Option<DeclarationSpecifier>,
+        size: usize,
+        first_occurrence: Option<TokenPos>,
+    },
+    Function {
+        par_list_len: Option<RangeInclusive<usize>>,
+        first_decl: Option<TokenPos>,
+    },
+    Label {
+        first_occurrence: TokenPos,
+    },
     Reserved(TokenType),
 }

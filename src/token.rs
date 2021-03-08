@@ -29,7 +29,11 @@ impl Bracket {
         }
     }
 
-    pub(crate) fn from(c: char) -> Option<Bracket> {
+    pub(crate) fn from_char_unchecked(c: char) -> Bracket {
+        Bracket::from_char(c).unwrap()
+    }
+
+    pub(crate) fn from_char(c: char) -> Option<Bracket> {
         use LeftOrRight::*;
         use BracketType::*;
 
@@ -66,9 +70,38 @@ pub(crate) enum Constant {
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
-pub(crate) enum UnaryOperationSymbol {
+pub(crate) enum UnaryOperation {
     LogicalNot,
-    Complement,  // ~
+    Complement,
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
+pub(crate) enum BinaryRelation {
+    Gt,
+    Eq,
+    Lt,
+    Ge,
+    Le,
+    Ne,
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
+pub(crate) enum BinaryOperation {
+    Div,
+    Mod,
+    Or,
+    Xor,
+    Shift(LeftOrRight),
+    Cmp(BinaryRelation),
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
+pub(crate) enum RichBinaryOperation {
+    RegularBinary(BinaryOperation),
+    Add,
+    Sub,
+    Mul,
+    And,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
@@ -91,42 +124,30 @@ pub(crate) enum DeclarationSpecifier {
 }
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, Hash)]
-pub(crate) enum PunctuationSymbol {
-    Comma,
-    Semicolon,
-    Colon,
-}
-
-#[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, Hash)]
-pub(crate) enum RelationSymbol {
-    Greater,
-    Less,
-    Equal,
-}
-
-#[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, Hash)]
-pub(crate) enum Character {
+pub(crate) enum Operator {
     Plus,
     Minus,
-    Slash,
-    Punctuation(PunctuationSymbol),
-    Or,
-    ExclusiveOr,
     Asterisk,
     Ampersand,
-    Bracket(Bracket),
-    Unary(UnaryOperationSymbol),
-    Relation(RelationSymbol),
-    QuestionMark,
+    Unary(UnaryOperation),
+    Binary(BinaryOperation),
+    Assign(Option<RichBinaryOperation>),
+    Inc,
+    Dec,
 }
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, Hash)]
 pub(crate) enum TokenType {
     ControlStatement(ControlStatementIdentifier),
     DeclarationSpecifier(DeclarationSpecifier),
-    Character(Character),
+    Operator(Operator),
     Name,
     Constant(Constant),
+    Comma,
+    Semicolon,
+    Colon,
+    Bracket(Bracket),
+    QuestionMark,
 }
 
 impl fmt::Display for TokenType {
@@ -157,41 +178,11 @@ impl fmt::Display for TokenType {
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug, Hash)]
 pub(crate) struct Token {
     pub(crate) token_type: TokenType,
-    pub(crate) value: Option<Vec<u8>>,
+    pub(crate) value: Option<String>,
 }
 
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
-    }
-}
-
-impl Character {
-    pub(crate) fn from_u8(c: u8) -> Option<Self> {
-        use crate::token::PunctuationSymbol::*;
-        use crate::token::RelationSymbol::*;
-        use crate::token::UnaryOperationSymbol::*;
-
-        let v = match c {
-            b',' => Character::Punctuation(Comma),
-            b';' => Character::Punctuation(Semicolon),
-            b'*' => Character::Asterisk,
-            b':' => Character::Punctuation(Colon),
-            b'(' | b'{' | b'[' |
-            b')' | b'}' | b']' => Character::Bracket(Bracket::from(c as char)?),
-            b'+' => Character::Plus,
-            b'-' => Character::Minus,
-            b'!' => Character::Unary(LogicalNot),
-            b'~' => Character::Unary(Complement),
-            b'&' => Character::Ampersand,
-            b'?' => Character::QuestionMark,
-            b'=' => Character::Relation(Equal),
-            b'<' => Character::Relation(Less),
-            b'>' => Character::Relation(Greater),
-            b'|' => Character::Or,
-            b'^' => Character::ExclusiveOr,
-            _ => return None,
-        };
-        Some(v)
     }
 }

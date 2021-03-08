@@ -4,15 +4,14 @@ use std::string::String;
 
 use crate::config::{CompilerOptions, SymbolTable, TypeOfColumnNo, TypeOfLineNo};
 use crate::generate_error_message_with_line_no;
-use crate::token::*;
 
 pub(crate) struct LexicalAnalyzer<'a> {
     pub(crate) compiler_options: &'a CompilerOptions,
-    pub(crate) second_symbol_of_escape_sequence_to_character_mapping: &'a HashMap<u8, u8>,
+    pub(crate) second_symbol_of_escape_sequence_to_character_mapping: &'a HashMap<char, char>,
     pub(crate) keywords: &'a SymbolTable,
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Copy, Debug)]
 pub(crate) struct TokenPos {
     pub(crate) line: TypeOfLineNo,
     pub(crate) column: TypeOfColumnNo,
@@ -30,6 +29,81 @@ impl fmt::Display for TokenPos {
     }
 }
 
+fn parse_binary_operator<'a, I>(op: I) -> Option<(crate::token::RichBinaryOperation, usize)>
+    where I: Iterator<Item=char> {
+    use crate::token::BinaryOperation::*;
+    use crate::token::BinaryRelation::*;
+    use crate::token::RichBinaryOperation::*;
+    use crate::token::LeftOrRight::*;
+
+    let s: Vec<char> = op.take(2).collect();
+    return Some(
+        match s[..2] {
+            ['=', '='] => (RegularBinary(Cmp(Eq)), 2),
+            ['!', '='] => (RegularBinary(Cmp(Ne)), 2),
+
+            ['<', '<'] => (RegularBinary(Shift(Left)), 2),
+            ['>', '>'] => (RegularBinary(Shift(Right)), 2),
+
+            ['<', '='] => (RegularBinary(Cmp(Le)), 2),
+            ['>', '='] => (RegularBinary(Cmp(Ge)), 2),
+
+            ['&', _] => (And, 1),
+            ['|', _] => (RegularBinary(Or), 1),
+            ['^', _] => (RegularBinary(Xor), 1),
+
+            ['+', _] => (Add, 1),
+            ['-', _] => (Sub, 1),
+
+            ['<', _] => (RegularBinary(Cmp(Lt)), 1),
+            ['>', _] => (RegularBinary(Cmp(Gt)), 1),
+
+            ['*', _] => (Mul, 1),
+            ['/', _] => (RegularBinary(Div), 1),
+            ['%', _] => (RegularBinary(Mod), 1),
+            _ => return None
+        }
+    );
+}
+
+fn parse_operator<'a, I>(op: I) -> Option<(crate::token::Operator, usize)>
+    where I: Iterator<Item=char> {
+    use crate::token::Operator::*;
+    use crate::token::BinaryOperation::*;
+    use crate::token::BinaryRelation::*;
+    use crate::token::RichBinaryOperation::*;
+
+    let s: Vec<char> = op.take(3).collect();
+    return Some(
+        match s[..3] {
+            ['=', '=', '='] => (Assign(Some(RegularBinary(Cmp(Eq)))), 3),
+            ['=', '=', _] => (Binary(Cmp(Eq)), 2),
+
+            ['=', _, _] => {
+                if let Some((rich_bin_op, rich_bin_op_len)) = parse_binary_operator(
+                    s[1..].into_iter().cloned()) {
+                    (Assign(Some(rich_bin_op)), 1 + rich_bin_op_len)
+                } else {
+                    (Assign(None), 1)
+                }
+            }
+
+            _ => {
+                if let Some((rich_bin_op, rich_bin_op_len)) = parse_binary_operator(
+                    s.into_iter()) {
+                    if let RegularBinary(bin_op) = rich_bin_op {
+                        (Binary(bin_op), rich_bin_op_len)
+                    } else {
+                        return None;
+                    }
+                } else {
+                    return None;
+                }
+            }
+        }
+    );
+}
+
 // #[derive(PartialEq, Eq, Clone, Copy)]
 // enum CharOrString {
 //     Char,
@@ -39,12 +113,15 @@ impl fmt::Display for TokenPos {
 impl LexicalAnalyzer<'_> {
     fn tokenize(
         &self,
-        source_code: &Vec<u8>,
-    ) -> Result<Vec<(Token, TokenPos)>, String> {
+        source_code: &str,
+    ) -> Result<Vec<(crate::token::Token, TokenPos)>, String> {
         use crate::symbol::SymbolType;
+        use crate::token::{Token, Constant, TokenType, Bracket};
+        use crate::token::Operator::*;
+        use crate::token::UnaryOperation::*;
 
         let mut res = Vec::<(Token, TokenPos)>::new();
-        let mut buffer = Vec::<u8>::new();
+        let mut buffer = String::new();
         let mut line_no: TypeOfLineNo = 1;
         let mut i: usize = 0;
         let mut curr_line_started_at: usize = 0;
@@ -52,14 +129,14 @@ impl LexicalAnalyzer<'_> {
 
         while i < source_code.len() {
             let token_pos = TokenPos { line: line_no, column: i - curr_line_started_at + 1 };
-            let curr_char = source_code[i];
-            if curr_char == b'\n' {
+            let curr_char = source_code.chars().nth(i).unwrap();
+            if curr_char == '\n' {
                 curr_line_started_at = i + 1;
                 line_no += 1;
             } else {
                 match curr_char {
-                    b'\'' | b'"' => {
-                        let this_literal_type = if curr_char == b'"' { Constant::String } else { Constant::Char };
+                    '\'' | '"' => {
+                        let this_literal_type = if curr_char == '"' { Constant::String } else { Constant::Char };
                         match currently_reading {
                             None => {
                                 res.push((Token {
@@ -80,20 +157,20 @@ impl LexicalAnalyzer<'_> {
                             }
                         }
                     }
-                    b'*' =>
+                    '*' =>
                         if currently_reading == None {
                             res.push((Token {
-                                token_type: TokenType::Character(Character::Asterisk),
+                                token_type: TokenType::Operator(Asterisk),
                                 value: None,
                             }, token_pos))
                         } else {
-                            match source_code.get(i + 1) {
+                            match source_code.chars().into_iter().nth(i + 1) {
                                 None => buffer.push(curr_char),
                                 Some(next_char) => {
-                                    match self.second_symbol_of_escape_sequence_to_character_mapping.get(next_char) {
+                                    match self.second_symbol_of_escape_sequence_to_character_mapping.get(&next_char) {
                                         None => {
                                             buffer.push(curr_char);
-                                            buffer.push(*next_char);
+                                            buffer.push(next_char);
                                         }
                                         Some(processed_escape_seq) => buffer.push(*processed_escape_seq),
                                     }
@@ -107,11 +184,25 @@ impl LexicalAnalyzer<'_> {
                             buffer.push(curr_char);
                         } else {
                             match curr_char {
-                                b' ' => (),
-                                b'a'..=b'z' | b'A'..=b'Z' | b'.' => {
-                                    let word: Vec<u8> = source_code[i..].iter().take_while(
-                                        |c| c.is_ascii_alphanumeric() || **c == b'.')
-                                        .cloned().collect();
+                                ' ' => (),
+                                ',' => res.push((Token {
+                                    token_type: TokenType::Comma,
+                                    value: None,
+                                }, token_pos)),
+                                ';' => res.push((Token {
+                                    token_type: TokenType::Semicolon,
+                                    value: None,
+                                }, token_pos)),
+                                ':' => res.push((Token {
+                                    token_type: TokenType::Colon,
+                                    value: None,
+                                }, token_pos)),
+                                'a'..='z' | 'A'..='Z' | '.' => {
+                                    let word: String = source_code[i..].chars().into_iter()
+                                        .take_while(
+                                            |c| c.is_ascii_alphanumeric() || *c == '.'
+                                        )
+                                        .collect();
                                     let word_len = word.len();
                                     if let Some(SymbolType::Reserved(token_type)) = self.keywords.get(&word) {
                                         res.push((Token {
@@ -127,25 +218,86 @@ impl LexicalAnalyzer<'_> {
                                     i += word_len;
                                     continue;
                                 }
-                                b'0'..=b'9' => {
-                                    let number_as_vec: Vec<u8> = source_code[i..].iter().take_while(
-                                        |c| c.is_ascii_digit())
-                                        .cloned().collect();
+                                '0'..='9' => {
+                                    let number_as_vec: String = source_code[i..].chars().into_iter().take_while(
+                                        |c| c.is_ascii_digit()
+                                    ).collect();
                                     let number_len = number_as_vec.len();
                                     res.push((
                                         Token {
-                                            token_type: TokenType::Constant(if curr_char == b'0' { Constant::Octal } else { Constant::Decimal }),
+                                            token_type: TokenType::Constant(if curr_char == '0' {
+                                                Constant::Octal
+                                            } else {
+                                                Constant::Decimal
+                                            }),
                                             value: Some(number_as_vec),
                                         }, token_pos));
                                     i += number_len;
                                     continue;
                                 }
+                                '+' => {
+                                    match source_code.chars().into_iter().nth(i + 1) {
+                                        Some('+') => {
+                                            res.push((Token {
+                                                token_type: TokenType::Operator(Inc),
+                                                value: None,
+                                            }, token_pos));
+                                            i += 2;
+                                            continue;
+                                        }
+                                        _ => res.push((Token {
+                                            token_type: TokenType::Operator(Plus),
+                                            value: None,
+                                        }, token_pos))
+                                    }
+                                }
+                                '-' => {
+                                    match source_code.chars().into_iter().nth(i + 1) {
+                                        Some('-') => {
+                                            res.push((Token {
+                                                token_type: TokenType::Operator(Dec),
+                                                value: None,
+                                            }, token_pos));
+                                            i += 2;
+                                            continue;
+                                        }
+                                        _ => res.push((Token {
+                                            token_type: TokenType::Operator(Minus),
+                                            value: None,
+                                        }, token_pos))
+                                    }
+                                }
+                                '!' => res.push((Token {
+                                    token_type: TokenType::Operator(Unary(LogicalNot)),
+                                    value: None,
+                                }, token_pos)),
+                                '~' => res.push((Token {
+                                    token_type: TokenType::Operator(Unary(Complement)),
+                                    value: None,
+                                }, token_pos)),
+                                '&' => res.push((Token {
+                                    token_type: TokenType::Operator(Ampersand),
+                                    value: None,
+                                }, token_pos)),
+                                '?' => res.push((Token {
+                                    token_type: TokenType::QuestionMark,
+                                    value: None,
+                                }, token_pos)),
+                                '[' | ']' | '(' | ')' | '{' | '}' => {
+                                    res.push((Token {
+                                        token_type: TokenType::Bracket(Bracket::from_char(curr_char as char).unwrap()),
+                                        value: None,
+                                    }, token_pos));
+                                }
                                 _ => {
-                                    if let Some(t) = Character::from_u8(curr_char) {
+                                    if let Some((op, tokens_read)) = parse_operator(
+                                        source_code[i..].chars().into_iter()) {
                                         res.push((Token {
-                                            token_type: TokenType::Character(t),
+                                            token_type: TokenType::Operator(op),
                                             value: None,
                                         }, token_pos));
+                                        i += tokens_read;
+                                        continue;
                                     } else {
                                         return Err(generate_error_message_with_line_no(
                                             format!("unknown character encountered: {}", curr_char as char), line_no));
@@ -168,9 +320,9 @@ impl LexicalAnalyzer<'_> {
 
     fn remove_comments(
         &self,
-        source_code: &Vec<u8>,
-    ) -> Result<Vec<u8>, String> {
-        let mut res = Vec::<u8>::with_capacity(source_code.len());
+        source_code: &str,
+    ) -> Result<String, String> {
+        let mut res = String::with_capacity(source_code.len());
         let mut line_no: TypeOfLineNo = 1;
         let mut comment = false;
         let mut char = false;
@@ -180,8 +332,8 @@ impl LexicalAnalyzer<'_> {
         let mut opening_literal_pos: Option<TokenPos> = None;
 
         while i < source_code.len() {
-            let curr_char = source_code[i];
-            if curr_char == b'\n' {
+            let curr_char = source_code.chars().nth(i).unwrap();
+            if curr_char == '\n' {
                 res.push(curr_char);
                 line_no += 1;
                 curr_line_started_at = i + 1;
@@ -190,8 +342,8 @@ impl LexicalAnalyzer<'_> {
             }
             if !comment {
                 match curr_char {
-                    b'\'' =>
-                        if !string && *res.last().unwrap_or(&b'\0') != b'*' {
+                    '\'' =>
+                        if !string && res.chars().last().unwrap_or('\0') != '*' {
                             if !char {
                                 opening_literal_pos = Some(TokenPos {
                                     line: line_no,
@@ -200,8 +352,8 @@ impl LexicalAnalyzer<'_> {
                             }
                             char = !char;
                         }
-                    b'"' =>
-                        if !char && *res.last().unwrap_or(&b'\0') != b'*' {
+                    '"' =>
+                        if !char && res.chars().last().unwrap_or('\0') != '*' {
                             if !string {
                                 opening_literal_pos = Some(TokenPos {
                                     line: line_no,
@@ -210,9 +362,9 @@ impl LexicalAnalyzer<'_> {
                             }
                             string = !string;
                         }
-                    b'/' =>
+                    '/' =>
                         if !string && !char {
-                            if let Some(b'*') = source_code.get(i + 1) {
+                            if let Some('*') = source_code.chars().nth(i + 1) {
                                 comment = true;
                                 i += 2;
                                 continue;
@@ -221,8 +373,8 @@ impl LexicalAnalyzer<'_> {
                     _ => ()
                 }
             } else {  // currently reading a comment
-                if curr_char == b'*' {
-                    if let Some(b'/') = source_code.get(i + 1) {
+                if curr_char == '*' {
+                    if let Some('/') = source_code.chars().nth(i + 1) {
                         comment = false;
                         i += 2;
                         continue;
@@ -230,7 +382,7 @@ impl LexicalAnalyzer<'_> {
                 }
             }
             if !comment {
-                res.push(source_code[i]);
+                res.push(source_code.chars().nth(i).unwrap());
             }
             i += 1;
         }
@@ -249,13 +401,12 @@ impl LexicalAnalyzer<'_> {
 
     pub(crate) fn run(
         &mut self,
-        source_code: &Vec<u8>,
-    ) -> Result<Vec<(Token, TokenPos)>, String> {
+        source_code: &str,
+    ) -> Result<Vec<(crate::token::Token, TokenPos)>, String> {
         let source_code = self.remove_comments(source_code)?;
         Ok(self.tokenize(&source_code)?)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -263,14 +414,14 @@ mod tests {
 
     use super::*;
 
-    fn lexical_analyzer_test<S: AsRef<Vec<u8>>, Z: AsRef<str>>(
+    fn lexical_analyzer_test<S: AsRef<String>, Z: AsRef<str>>(
         inp: S,
         exp_out: Result<&Vec<(Token, TokenPos)>, String>,
         panic_msg: Option<Z>,
         scan_first: bool,
         compiler_options: &CompilerOptions,
         keywords: &SymbolTable,
-        second_symbol_of_escape_sequence_to_character_mapping: &HashMap<u8, u8>,
+        second_symbol_of_escape_sequence_to_character_mapping: &HashMap<char, char>,
     ) -> Result<(), String> {
         let inp = inp.as_ref();
         let exp_out = exp_out.as_ref();
@@ -280,7 +431,7 @@ mod tests {
             keywords,
         };
 
-        let mut after_scan: Vec<u8>;
+        let mut after_scan: String;
         if scan_first {
             after_scan = la.remove_comments(inp)?;
         } else {
@@ -307,7 +458,7 @@ mod tests {
         Ok(())
     }
 
-    fn scanner_test<S: AsRef<Vec<u8>>, T: AsRef<Vec<u8>>, Z: AsRef<str>>(
+    fn scanner_test<S: AsRef<String>, T: AsRef<String>, Z: AsRef<str>>(
         inp: S,
         exp_out: T,
         panic_msg: Option<Z>,
@@ -335,13 +486,13 @@ mod tests {
 
     #[test]
     fn test_scanner_remove_comments() -> Result<(), String> {
-        scanner_test(Vec::<u8>::from("\
+        scanner_test(String::from("\
         main() {\
         auto a, b  /* my comment\
 
         */;\
         }\
-        "), Vec::<u8>::from("\
+        "), String::from("\
         main() {\
         auto a, b  \
 
@@ -352,22 +503,22 @@ mod tests {
 
     #[test]
     fn test_scanner_strings_containing_comments() -> Result<(), String> {
-        let test_res = scanner_test(Vec::<u8>::from("\
+        let test_res = scanner_test(String::from("\
         main() {
             a \" /* my string containing comment */ \";
         }"),
-                                    Vec::<u8>::from("\
+                                    String::from("\
         main() {
             a \" /* my string containing comment */ \";
         }"),
                                     None::<Box<str>>)?;
 
-        scanner_test(Vec::<u8>::from("\
+        scanner_test(String::from("\
         main() {
         a \"a     long    string  \";
         b \"a long string that contains a /*comment*/\";
         }"),
-                     Vec::<u8>::from("\
+                     String::from("\
         main() {
         a \"a     long    string  \";
         b \"a long string that contains a /*comment*/\";

@@ -6,10 +6,8 @@ use crate::config::TypeOfLineNo;
 
 mod lexical_analyzer;
 mod parser;
-mod code_generator;
 mod config;
 mod token;
-mod grammar;
 mod symbol;
 
 fn generate_error_message_with_line_no<S: AsRef<str>>(
@@ -27,8 +25,19 @@ fn process_command_line_arguments()
         return Err("not enough arguments");
     }
 
-    if args.len() > 2 {
-        return Err("compiler options are not supported yet");
+    let mut comp_opts = CompilerOptions::default();
+    let target_pattern = "--target=";
+
+    let mut i: usize = 2;
+    while i < args.len() {
+        if args[i].starts_with(target_pattern) {
+            match &args[i][target_pattern.len()..] {
+                "native" => {
+                    comp_opts = CompilerOptions::default();
+                }
+                _ => ()
+            }
+        }
     }
 
     Ok((args[1].clone(), CompilerOptions::default()))
@@ -44,7 +53,9 @@ fn main() {
     let source_code = std::fs::read_to_string(filename).unwrap_or_else(|err| {
         eprintln!("Something went wrong reading the file: {}", err);
         process::exit(1);
-    }).into_bytes();
+    });
+
+    assert!(source_code.chars().all(|c| c.is_ascii()), "Source code file must be in ASCII");
 
     let mut lexical_analyzer = lexical_analyzer::LexicalAnalyzer {
         compiler_options: &compiler_options,
@@ -58,15 +69,15 @@ fn main() {
         });
 
     let mut parser = parser::Parser {
-        compiler_options: &compiler_options,
+        compiler_options,
         source_code: Some(&source_code),
-        symbol_table: &get_default_symbols(),
+        symbol_table: get_default_symbols(),
     };
-    let (syntax_tree, symbol_table) = parser.run(&tokens).unwrap_or_else(
+    let code = parser.run(&tokens).unwrap_or_else(
         |err| {
             eprintln!("Parser returned an error: {}", err);
             process::exit(1);
         });
 
-    dbg!(&syntax_tree);
+    dbg!(&code);
 }
