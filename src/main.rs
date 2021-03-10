@@ -1,20 +1,21 @@
+use std::borrow::Borrow;
 use std::process;
 
 use crate::config::{get_default_symbols, get_second_symbol_of_escape_sequence_to_character_mapping};
 use crate::config::CompilerOptions;
-use crate::config::TypeOfLineNo;
 
 mod lexical_analyzer;
 mod parser;
 mod config;
 mod token;
 mod symbol;
+mod ast;
 
-fn generate_error_message_with_line_no<S: AsRef<str>>(
-    error_str: S,
-    line_no: TypeOfLineNo,
+fn generate_error_message_with_pos<T: Borrow<str>, U: Borrow<lexical_analyzer::TokenPos>>(
+    error_str: T,
+    pos: U,
 ) -> String {
-    format!("Error: {}. Line: {}", error_str.as_ref(), line_no.to_string())
+    format!("Error at {}: {}", pos.borrow(), error_str.borrow())
 }
 
 fn process_command_line_arguments()

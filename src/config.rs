@@ -18,7 +18,7 @@ pub(crate) enum PlatformName {
 }
 
 pub(crate) struct TargetPlatform {
-    platform_name: PlatformName,
+    pub(crate) platform_name: PlatformName,
     pub(crate) arch: Arch,
 }
 
@@ -75,12 +75,9 @@ pub(crate) fn get_second_symbol_of_escape_sequence_to_character_mapping() -> Has
     ].into_iter().collect()
 }
 
-pub(crate) type TypeOfLineNo = usize;
-pub(crate) type TypeOfColumnNo = usize;
 pub(crate) type SymbolTable = HashMap<String, SymbolType>;
 
 pub(crate) fn get_default_symbols() -> SymbolTable {
-    use SymbolType::*;
     // use std::ops::RangeInclusive;
 
     let mut res = Vec::<(&str, SymbolType)>::new();

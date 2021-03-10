@@ -1,5 +1,7 @@
 use std::fmt;
 
+use crate::lexical_analyzer::TokenPos;
+
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
 pub(crate) enum BracketType {
     Round,
@@ -177,8 +179,9 @@ impl fmt::Display for TokenType {
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug, Hash)]
 pub(crate) struct Token {
-    pub(crate) token_type: TokenType,
-    pub(crate) value: Option<String>,
+    pub(crate) r#type: TokenType,
+    pub(crate) val: Option<String>,
+    pub(crate) pos: TokenPos,
 }
 
 impl fmt::Display for Token {
