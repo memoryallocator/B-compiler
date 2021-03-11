@@ -77,7 +77,7 @@ impl Parser<'_> {
         if stack.is_empty() {
             return BracketsStatus::Ok;
         }
-        BracketsStatus::NotClosed(stack.last().unwrap().1.clone())
+        BracketsStatus::NotClosed(*stack.pop().unwrap().1)
     }
 
     pub(crate) fn run(

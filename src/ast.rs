@@ -34,10 +34,27 @@ impl Parse for Ival {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Constant {
     constant_type: crate::token::Constant,
     value: String,
+}
+
+impl Parse for Constant {
+    fn parse(tokens: &[Token]) -> Option<(Self, usize)>
+        where Self: Sized {
+        if let Some(Token {
+                        r#type: TokenType::Constant(constant_type),
+                        val,
+                        ..
+                    }) = tokens.first() {
+            return Some((Constant {
+                constant_type: constant_type.clone(),
+                value: val.as_ref().unwrap().clone(),
+            }, 1));
+        }
+        None
+    }
 }
 
 #[derive(Debug)]
@@ -48,9 +65,12 @@ pub(crate) struct VariableDefinitionNode {
 
 impl Parse for VariableDefinitionNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)> {
-        let tokens: Vec<&Token> = tokens.into_iter()
+        let tokens_cut: Vec<&Token> = tokens.into_iter()
             .take_while(|t| t.r#type != TokenType::Semicolon)
             .collect();
+        if tokens_cut.len() == tokens.len() {  // no semicolon found
+            return None;
+        }
         return
             Some((
                 if let Some(
@@ -58,11 +78,12 @@ impl Parse for VariableDefinitionNode {
                         r#type: TokenType::Name,
                         val: name,
                         ..
-                    }) = tokens.get(0) {
+                    }) = tokens_cut.get(0) {
                     let name = name.as_ref().unwrap().clone();
+
                     VariableDefinitionNode {
                         name,
-                        initial_value: match tokens.get(1) {
+                        initial_value: match tokens_cut.get(1) {
                             None => None,
                             Some(&t) =>
                                 if let Some((ival, _)) = Ival::parse(&[t.clone()]) {
@@ -74,7 +95,7 @@ impl Parse for VariableDefinitionNode {
                     }
                 } else {
                     return None;
-                }, tokens.len() + 1));
+                }, tokens_cut.len() + 1));
     }
 }
 
@@ -82,13 +103,99 @@ impl Parse for VariableDefinitionNode {
 pub(crate) struct VectorDefinitionNode {
     name: String,
     specified_element_count: Option<Constant>,
-    initial_values: Option<Vec<Constant>>,
+    initial_values: Option<Vec<Ival>>,
 }
 
 impl Parse for VectorDefinitionNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        todo!()
+        use crate::token::{Bracket, BracketType};
+        use crate::token::LeftOrRight::*;
+
+        let tokens_cut: Vec<&Token> = tokens.into_iter()
+            .take_while(|t| t.r#type != TokenType::Semicolon)
+            .collect();
+        if tokens_cut.len() == tokens.len() {  // no semicolon found
+            return None;
+        }
+
+        const LEFT_SQUARE_BRACKET: Bracket = Bracket {
+            left_or_right: Left,
+            bracket_type: BracketType::Square,
+        };
+        const RIGHT_SQUARE_BRACKET: Bracket = Bracket {
+            left_or_right: Right,
+            bracket_type: BracketType::Square,
+        };
+
+        if tokens_cut.len() < 2 {
+            return None;
+        }
+        let node = match tokens_cut[..2] {
+            [Token {
+                r#type: TokenType::Name,
+                val: name,
+                ..
+            }, Token {
+                r#type: TokenType::Bracket(LEFT_SQUARE_BRACKET),
+                ..
+            }] => {
+                let name = name.as_ref().unwrap().clone();
+                let specified_element_count;
+                let right_bracket_pos;
+
+                if let Some((r#const, _)) = Constant::parse(&tokens[2..]) {
+                    right_bracket_pos = 3;
+                    specified_element_count = Some(r#const);
+                } else {
+                    right_bracket_pos = 2;
+                    specified_element_count = None;
+                }
+
+                if let Some(Token {
+                                r#type: TokenType::Bracket(RIGHT_SQUARE_BRACKET), ..
+                            }) = tokens_cut.get(right_bracket_pos) {
+                    if tokens_cut.get(right_bracket_pos + 1).is_none() {  // name [ const? ] ;
+                        VectorDefinitionNode {
+                            name,
+                            specified_element_count,
+                            initial_values: None,
+                        }
+                    } else {
+                        let mut initial_values = Vec::<Ival>::new();
+                        let first_ival_pos: usize = right_bracket_pos + 1;
+                        while let Some((ival, _)) = Ival::parse(
+                            &tokens[first_ival_pos + 2 * initial_values.len()..]) {
+                            let comma_pos = first_ival_pos + 2 * initial_values.len() + 1;
+                            let next = tokens_cut.get(comma_pos);
+                            match next {
+                                Some(
+                                    Token {
+                                        r#type: TokenType::Comma,
+                                        ..
+                                    }) => {  // ival , ...
+                                    initial_values.push(ival);
+                                }
+                                None => {  // ival $
+                                    initial_values.push(ival);
+                                    break;
+                                }
+                                _ => return None,
+                            }
+                        }
+                        VectorDefinitionNode {
+                            name,
+                            specified_element_count,
+                            initial_values: Some(initial_values),
+                        }
+                    }
+                } else {
+                    return None;
+                }
+            }
+            _ => return None
+        };
+        Some((node, tokens_cut.len() + 1))
     }
 }
 

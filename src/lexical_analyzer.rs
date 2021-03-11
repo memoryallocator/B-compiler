@@ -125,9 +125,14 @@ impl LexicalAnalyzer<'_> {
         let mut curr_line_started_at: usize = 0;
         let mut currently_reading: Option<Constant> = None;
 
+        let read_name = |s: &str| s.chars()
+            .into_iter()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect::<String>();
+
         while i < source_code.len() {
             let token_pos = TokenPos { line: line_no, column: i - curr_line_started_at + 1 };
-            let curr_char = source_code.chars().nth(i).unwrap();
+            let curr_char = source_code.chars().nth(i).unwrap_or_default();
             if curr_char == '\n' {
                 curr_line_started_at = i + 1;
                 line_no += 1;
@@ -201,11 +206,7 @@ impl LexicalAnalyzer<'_> {
                                     pos: token_pos,
                                 }),
                                 'a'..='z' | 'A'..='Z' => {
-                                    let word: String = source_code[i..].chars().into_iter()
-                                        .take_while(
-                                            |c| c.is_ascii_alphanumeric() || *c == '_'
-                                        )
-                                        .collect();
+                                    let word = read_name(&source_code[i..]);
                                     let word_len = word.len();
                                     if let Some(SymbolType::Reserved(token_type)) = self.keywords.get(&word) {
                                         res.push(Token {
@@ -224,7 +225,24 @@ impl LexicalAnalyzer<'_> {
                                     continue;
                                 }
                                 '.' => {
-                                    if let Some(t) = res.last() {}
+                                    if let Some(
+                                        t @ Token {
+                                            r#type: TokenType::Name,
+                                            ..
+                                        }) = res.last() {
+                                        if ["rd", "wr"].contains(&&**t.val.as_ref().unwrap()) {
+                                            let next_name = read_name(&source_code[i + 1..]);
+                                            if next_name == "unit" {
+                                                i += 1 + 4;  // .unit
+                                                let mut last_tok = res.last_mut().unwrap();
+                                                last_tok.val = Some("_".to_owned()
+                                                    + &last_tok.val.as_ref().unwrap()
+                                                    + &".".to_owned()
+                                                    + &*next_name);
+                                                continue;
+                                            }
+                                        }
+                                    }
                                     return Err(generate_error_message_with_pos(
                                         "the only place the dot symbol is allowed in is wr.unit, rd.unit variables' names"
                                             .to_string(),
@@ -438,13 +456,15 @@ impl LexicalAnalyzer<'_> {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Borrow;
+
     use crate::config::{get_default_symbols, get_second_symbol_of_escape_sequence_to_character_mapping};
 
     use super::*;
 
     fn lexical_analyzer_test<S: AsRef<String>, Z: AsRef<str>>(
         inp: S,
-        exp_out: Result<&Vec<(Token, TokenPos)>, String>,
+        exp_out: Result<&Vec<Token>, String>,
         panic_msg: Option<Z>,
         scan_first: bool,
         compiler_options: &CompilerOptions,
@@ -486,13 +506,13 @@ mod tests {
         Ok(())
     }
 
-    fn scanner_test<S: AsRef<String>, T: AsRef<String>, Z: AsRef<str>>(
+    fn scanner_test<S: Borrow<String>, T: Borrow<String>, Z: Borrow<str>>(
         inp: S,
         exp_out: T,
         panic_msg: Option<Z>,
     ) -> Result<(), String> {
-        let inp = inp.as_ref();
-        let exp_out = exp_out.as_ref();
+        let inp = inp.borrow();
+        let exp_out = exp_out.borrow();
         let co = CompilerOptions::default();
         let esm = get_second_symbol_of_escape_sequence_to_character_mapping();
         let kw = get_default_symbols();
@@ -503,11 +523,10 @@ mod tests {
         };
 
         let res = la.remove_comments(inp)?;
-        let res = String::from_utf8(res).unwrap();
-        let ans = String::from_utf8(exp_out.clone()).unwrap();
+        let ans = exp_out;
         match panic_msg {
-            None => assert_eq!(res, ans),
-            Some(msg) => assert_eq!(res, ans, "{}", msg.as_ref()),
+            None => assert_eq!(res, *ans),
+            Some(msg) => assert_eq!(res, *ans, "{}", msg.borrow()),
         }
         Ok(())
     }

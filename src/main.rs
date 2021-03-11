@@ -19,11 +19,11 @@ fn generate_error_message_with_pos<T: Borrow<str>, U: Borrow<lexical_analyzer::T
 }
 
 fn process_command_line_arguments()
-    -> Result<(String, CompilerOptions), &'static str> {
+    -> Result<(String, CompilerOptions), String> {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
-        return Err("not enough arguments");
+        return Err("not enough arguments".to_string());
     }
 
     let mut comp_opts = CompilerOptions::default();
@@ -31,17 +31,24 @@ fn process_command_line_arguments()
 
     let mut i: usize = 2;
     while i < args.len() {
-        if args[i].starts_with(target_pattern) {
-            match &args[i][target_pattern.len()..] {
+        let option_str = &args[i];
+        if option_str.starts_with(target_pattern) {
+            let target = &args[i][target_pattern.len()..];
+            match target {
                 "native" => {
                     comp_opts = CompilerOptions::default();
                 }
-                _ => ()
+                _ => {
+                    return Err(format!("unknown target: {}", target));
+                }
             }
+        } else {
+            return Err(format!("unknown compiler option: {}", option_str));
         }
+        i += 1;
     }
 
-    Ok((args[1].clone(), CompilerOptions::default()))
+    Ok((args[1].clone(), comp_opts))
 }
 
 fn main() {
