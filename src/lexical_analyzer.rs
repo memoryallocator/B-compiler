@@ -224,12 +224,10 @@ impl LexicalAnalyzer<'_> {
                                     i += word_len;
                                     continue;
                                 }
-                                '.' => {
+                                '.' =>
                                     if let Some(
-                                        t @ Token {
-                                            r#type: TokenType::Name,
-                                            ..
-                                        }) = res.last() {
+                                        t @ Token { r#type: TokenType::Name, .. }
+                                    ) = res.last() {
                                         if ["rd", "wr"].contains(&&**t.val.as_ref().unwrap()) {
                                             let next_name = read_name(&source_code[i + 1..]);
                                             if next_name == "unit" {
@@ -242,12 +240,12 @@ impl LexicalAnalyzer<'_> {
                                                 continue;
                                             }
                                         }
+                                    } else {
+                                        return Err(generate_error_message_with_pos(
+                                            "the only place the dot symbol is allowed in is wr.unit, rd.unit variables' names"
+                                                .to_string(),
+                                            token_pos));
                                     }
-                                    return Err(generate_error_message_with_pos(
-                                        "the only place the dot symbol is allowed in is wr.unit, rd.unit variables' names"
-                                            .to_string(),
-                                        token_pos));
-                                }
                                 '0'..='9' => {
                                     let number_as_vec: String = source_code[i..].chars().into_iter().take_while(
                                         |c| c.is_ascii_digit()

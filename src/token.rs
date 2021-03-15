@@ -22,6 +22,34 @@ pub(crate) struct Bracket {
 }
 
 impl Bracket {
+    pub(crate) const fn left_round_bracket() -> Bracket {
+        Bracket {
+            left_or_right: LeftOrRight::Left,
+            bracket_type: BracketType::Round,
+        }
+    }
+
+    pub(crate) const fn right_round_bracket() -> Bracket {
+        Bracket {
+            left_or_right: LeftOrRight::Right,
+            bracket_type: BracketType::Round,
+        }
+    }
+
+    pub(crate) const fn left_square_bracket() -> Bracket {
+        Bracket {
+            left_or_right: LeftOrRight::Left,
+            bracket_type: BracketType::Square,
+        }
+    }
+
+    pub(crate) const fn right_square_bracket() -> Bracket {
+        Bracket {
+            left_or_right: LeftOrRight::Right,
+            bracket_type: BracketType::Square,
+        }
+    }
+
     pub(crate) fn paired_bracket(b: &Bracket) -> Bracket {
         use LeftOrRight::*;
 

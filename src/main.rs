@@ -81,11 +81,9 @@ fn main() {
         source_code: Some(&source_code),
         symbol_table: get_default_symbols(),
     };
-    let code = parser.run(&tokens).unwrap_or_else(
+    let ast = parser.run(&tokens).unwrap_or_else(
         |err| {
             eprintln!("Parser returned an error: {}", err);
             process::exit(1);
         });
-
-    dbg!(&code);
 }
