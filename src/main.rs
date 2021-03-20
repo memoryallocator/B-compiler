@@ -4,12 +4,11 @@ use std::process;
 use crate::config::{get_default_symbols, get_second_symbol_of_escape_sequence_to_character_mapping};
 use crate::config::CompilerOptions;
 
+mod token;
 mod lexical_analyzer;
 mod parser;
 mod config;
-mod token;
 mod symbol;
-mod ast;
 
 fn generate_error_message_with_pos<T: Borrow<str>, U: Borrow<lexical_analyzer::TokenPos>>(
     error_str: T,
@@ -81,9 +80,11 @@ fn main() {
         source_code: Some(&source_code),
         symbol_table: get_default_symbols(),
     };
-    let ast = parser.run(&tokens).unwrap_or_else(
+    let (ast, sym_tab, warnings) = parser.run(&tokens).unwrap_or_else(
         |err| {
             eprintln!("Parser returned an error: {}", err);
             process::exit(1);
         });
+
+    // dbg!(ast);
 }

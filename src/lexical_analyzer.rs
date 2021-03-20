@@ -19,6 +19,35 @@ pub(crate) struct TokenPos {
 }
 
 impl TokenPos {
+    pub(crate) fn repr(&self) -> String {
+        format!("{},{}", self.line, self.column)
+    }
+
+    pub(crate) fn parse<T: AsRef<str>>(s: T) -> Option<Self> {
+        let line_and_col: Vec::<&str> = s.as_ref().split(',').collect();
+        if line_and_col.len() != 2 {
+            return None;
+        }
+        match line_and_col[..2] {
+            [line, col] => {
+                let line = line.parse::<usize>();
+                let column = col.parse::<usize>();
+                if line.is_ok() && column.is_ok() {
+                    let line = line.unwrap();
+                    let column = column.unwrap();
+                    return Some(TokenPos {
+                        line,
+                        column,
+                    });
+                }
+            }
+            _ => unreachable!()
+        }
+        None
+    }
+}
+
+impl TokenPos {
     pub(crate) fn from(line: usize, column: usize) -> Self {
         TokenPos { line, column }
     }
@@ -127,7 +156,7 @@ impl LexicalAnalyzer<'_> {
 
         let read_name = |s: &str| s.chars()
             .into_iter()
-            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .take_while(|c| c.is_ascii_alphanumeric() || ['_', '.'].contains(c))
             .collect::<String>();
 
         while i < source_code.len() {
@@ -188,6 +217,29 @@ impl LexicalAnalyzer<'_> {
                         if let Some(_) = currently_reading {
                             buffer.push(curr_char);
                         } else {
+                            {
+                                let word = read_name(&source_code[i..]);
+                                let word_len = word.len();
+                                if word_len > 0 {
+                                    if let Some(
+                                        SymbolType::Reserved(token_type)
+                                    ) = self.keywords.get(&word) {
+                                        res.push(Token {
+                                            r#type: token_type.clone(),
+                                            val: None,
+                                            pos: token_pos,
+                                        });
+                                    } else {
+                                        res.push(Token {
+                                            val: Some(word),
+                                            r#type: TokenType::Name,
+                                            pos: token_pos,
+                                        });
+                                    }
+                                    i += word_len;
+                                    continue;
+                                }
+                            }
                             match curr_char {
                                 ' ' => (),
                                 ',' => res.push(Token {
@@ -205,60 +257,20 @@ impl LexicalAnalyzer<'_> {
                                     val: None,
                                     pos: token_pos,
                                 }),
-                                'a'..='z' | 'A'..='Z' => {
-                                    let word = read_name(&source_code[i..]);
-                                    let word_len = word.len();
-                                    if let Some(SymbolType::Reserved(token_type)) = self.keywords.get(&word) {
-                                        res.push(Token {
-                                            r#type: token_type.clone(),
-                                            val: None,
-                                            pos: token_pos,
-                                        });
-                                    } else {
-                                        res.push(Token {
-                                            val: Some(word),
-                                            r#type: TokenType::Name,
-                                            pos: token_pos,
-                                        });
-                                    }
-                                    i += word_len;
-                                    continue;
-                                }
-                                '.' =>
-                                    if let Some(
-                                        t @ Token { r#type: TokenType::Name, .. }
-                                    ) = res.last() {
-                                        if ["rd", "wr"].contains(&&**t.val.as_ref().unwrap()) {
-                                            let next_name = read_name(&source_code[i + 1..]);
-                                            if next_name == "unit" {
-                                                i += 1 + 4;  // .unit
-                                                let mut last_tok = res.last_mut().unwrap();
-                                                last_tok.val = Some("_".to_owned()
-                                                    + &last_tok.val.as_ref().unwrap()
-                                                    + &".".to_owned()
-                                                    + &*next_name);
-                                                continue;
-                                            }
-                                        }
-                                    } else {
-                                        return Err(generate_error_message_with_pos(
-                                            "the only place the dot symbol is allowed in is wr.unit, rd.unit variables' names"
-                                                .to_string(),
-                                            token_pos));
-                                    }
                                 '0'..='9' => {
-                                    let number_as_vec: String = source_code[i..].chars().into_iter().take_while(
-                                        |c| c.is_ascii_digit()
-                                    ).collect();
-                                    let number_len = number_as_vec.len();
+                                    let number_as_str: String = source_code[i..].chars().into_iter()
+                                        .take_while(|c| c.is_ascii_digit())
+                                        .collect();
+                                    let number_len = number_as_str.len();
                                     res.push(
                                         Token {
-                                            r#type: TokenType::Constant(if curr_char == '0' {
-                                                Constant::Octal
-                                            } else {
-                                                Constant::Decimal
-                                            }),
-                                            val: Some(number_as_vec),
+                                            r#type: TokenType::Constant(
+                                                if curr_char == '0' {
+                                                    Constant::Octal
+                                                } else {
+                                                    Constant::Decimal
+                                                }),
+                                            val: Some(number_as_str),
                                             pos: token_pos,
                                         });
                                     i += number_len;
@@ -320,14 +332,13 @@ impl LexicalAnalyzer<'_> {
                                     val: None,
                                     pos: token_pos,
                                 }),
-                                '[' | ']' | '(' | ')' | '{' | '}' => {
+                                '[' | ']' | '(' | ')' | '{' | '}' =>
                                     res.push(Token {
-                                        r#type: TokenType::Bracket(Bracket::from_char(curr_char as char).unwrap()),
+                                        r#type: TokenType::Bracket(Bracket::from_char_unchecked(curr_char)),
                                         val: None,
                                         pos: token_pos,
-                                    });
-                                }
-                                _ => {
+                                    }),
+                                _ =>
                                     if let Some((op, tokens_read)) = parse_operator(
                                         source_code[i..].chars().into_iter()) {
                                         res.push(Token {
@@ -343,7 +354,6 @@ impl LexicalAnalyzer<'_> {
                                                     curr_char as char),
                                             token_pos));
                                     }
-                                }
                             }
                         }
                 }

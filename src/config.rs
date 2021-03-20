@@ -5,11 +5,18 @@ use crate::token::ControlStatementIdentifier::*;
 use crate::token::DeclarationSpecifier::*;
 use crate::token::TokenType;
 
+pub(crate) struct Warning {
+    pub(crate) text: String,
+    pub(crate) pos: crate::lexical_analyzer::TokenPos,
+}
+
+#[allow(non_camel_case_types)]
 pub(crate) enum Arch {
     x86_32,
     x86_64,
 }
 
+#[warn(non_camel_case_types)]
 pub(crate) enum PlatformName {
     Linux,
     Bsd,

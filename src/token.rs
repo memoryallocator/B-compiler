@@ -2,17 +2,20 @@ use std::fmt;
 
 use crate::lexical_analyzer::TokenPos;
 
+pub(crate) const LEFT_ROUND_BRACKET: TokenType = TokenType::Bracket(Bracket::left_round_bracket());
+pub(crate) const RIGHT_ROUND_BRACKET: TokenType = TokenType::Bracket(Bracket::right_round_bracket());
+
+pub(crate) const LEFT_SQUARE_BRACKET: TokenType = TokenType::Bracket(Bracket::left_square_bracket());
+pub(crate) const RIGHT_SQUARE_BRACKET: TokenType = TokenType::Bracket(Bracket::right_square_bracket());
+
+pub(crate) const LEFT_CURLY_BRACKET: TokenType = TokenType::Bracket(Bracket::left_curly_bracket());
+pub(crate) const RIGHT_CURLY_BRACKET: TokenType = TokenType::Bracket(Bracket::left_curly_bracket());
+
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
 pub(crate) enum BracketType {
     Round,
     Curly,
     Square,
-}
-
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
-pub(crate) enum LeftOrRight {
-    Left,
-    Right,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
@@ -26,6 +29,7 @@ impl Bracket {
         Bracket {
             left_or_right: LeftOrRight::Left,
             bracket_type: BracketType::Round,
+
         }
     }
 
@@ -33,6 +37,7 @@ impl Bracket {
         Bracket {
             left_or_right: LeftOrRight::Right,
             bracket_type: BracketType::Round,
+
         }
     }
 
@@ -40,6 +45,7 @@ impl Bracket {
         Bracket {
             left_or_right: LeftOrRight::Left,
             bracket_type: BracketType::Square,
+
         }
     }
 
@@ -47,6 +53,22 @@ impl Bracket {
         Bracket {
             left_or_right: LeftOrRight::Right,
             bracket_type: BracketType::Square,
+
+        }
+    }
+
+    pub(crate) const fn left_curly_bracket() -> Bracket {
+        Bracket {
+            left_or_right: LeftOrRight::Left,
+            bracket_type: BracketType::Curly,
+
+        }
+    }
+
+    pub(crate) const fn right_curly_bracket() -> Bracket {
+        Bracket {
+            left_or_right: LeftOrRight::Right,
+            bracket_type: BracketType::Curly,
         }
     }
 
@@ -89,6 +111,12 @@ impl Bracket {
             _ => None
         }
     }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
+pub(crate) enum LeftOrRight {
+    Left,
+    Right,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
@@ -182,31 +210,12 @@ pub(crate) enum TokenType {
 
 impl fmt::Display for TokenType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // let mut value;
-        // match self {
-        //     TokenType::Unary(_) => value = "Unary",
-        //     TokenType::Binary(_) => value = "Binary",
-        //     TokenType::Assign(_) => value = "Assign",
-        //     TokenType::Name => value = "Name",
-        //     TokenType::Constant(_) => value = "Constant",
-        //     TokenType::Bracket(_) => {}
-        //     TokenType::Comma => {}
-        //     Semicolon => {}
-        //     TokenType::Colon => {}
-        //     TokenType::Asterisk => {}
-        //     TokenType::Ampersand => {}
-        //     TokenType::Plus => {}
-        //     TokenType::Minus => {}
-        //     TokenType::ControlStatement(_) => {}
-        //     TokenType::DeclarationSpecifier(_) => {}
-        //     TokenType::QuestionMark => {}
-        // }
         write!(f, "{:?}", self)
     }
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug, Hash)]
-pub(crate) struct Token {
+pub struct Token {
     pub(crate) r#type: TokenType,
     pub(crate) val: Option<String>,
     pub(crate) pos: TokenPos,
