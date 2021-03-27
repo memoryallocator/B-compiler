@@ -1,20 +1,23 @@
 use core::slice::Iter;
 use std::cell::RefCell;
+use std::convert::TryFrom;
 use std::rc::Rc;
 
+use token::{Token, TokenType};
+
 use crate::lexical_analyzer::TokenPos;
-use crate::token::{Token, TokenType};
+use crate::token;
 
 pub(crate) trait Parse {
-    fn parse(tokens: &[Token]) -> Option<(Self, usize)>
+    fn parse(input: &[Token]) -> Option<(Self, usize)>
         where Self: Sized;
 }
 
 pub(crate) trait ParseExact: Parse {
-    fn parse_exact(tokens: &[Token]) -> Option<Self>
+    fn parse_exact(input: &[Token]) -> Option<Self>
         where Self: Sized {
-        if let Some((obj, adv)) = Self::parse(&tokens) {
-            return if adv == tokens.len() {
+        if let Some((obj, adv)) = Self::parse(&input) {
+            return if adv == input.len() {
                 Some(obj)
             } else {
                 None
@@ -50,26 +53,31 @@ impl Parse for Ival {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct Constant {
-    constant_type: crate::token::Constant,
+    constant_type: token::Constant,
     value: String,
+}
+
+impl TryFrom<&Token> for Constant {
+    type Error = ();
+
+    fn try_from(t: &Token) -> Result<Self, Self::Error> {
+        return if let TokenType::Constant(const_type) = t.r#type {
+            Ok(Constant {
+                constant_type: const_type,
+                value: t.val.as_ref().unwrap().clone(),
+            })
+        } else {
+            Err(())
+        };
+    }
 }
 
 impl Parse for Constant {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        if let Some(Token {
-                        r#type: TokenType::Constant(constant_type),
-                        val,
-                        ..
-                    }) = tokens.first() {
-            return Some((Constant {
-                constant_type: constant_type.clone(),
-                value: val.as_ref().unwrap().clone(),
-            }, 1));
-        }
-        None
+        Some((Constant::try_from(tokens.get(0)?).ok()?, 1))
     }
 }
 
@@ -127,7 +135,7 @@ pub(crate) struct VectorDefinitionNode {
 impl Parse for VectorDefinitionNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        use crate::token::LEFT_SQUARE_BRACKET;
+        use token::LEFT_SQUARE_BRACKET;
 
         let toks_trim: Vec<&Token> = tokens.into_iter()
             .take_while(|t| t.r#type != TokenType::Semicolon)
@@ -251,7 +259,7 @@ pub(crate) struct FunctionDefinitionNode {
 impl Parse for FunctionDefinitionNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        use crate::token::{LEFT_ROUND_BRACKET, RIGHT_ROUND_BRACKET};
+        use token::{LEFT_ROUND_BRACKET, RIGHT_ROUND_BRACKET};
 
         if tokens.len() < 4 {
             return None;
@@ -311,7 +319,7 @@ struct AutoDeclaration {
 impl Parse for AutoDeclaration {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        use crate::token::Bracket;
+        use token::Bracket;
 
         if tokens.is_empty() {
             return None;
@@ -377,7 +385,7 @@ struct AutoDeclarationNode {
 impl Parse for AutoDeclarationNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        use crate::token::DeclarationSpecifier::Auto;
+        use token::DeclarationSpecifier::Auto;
 
         if tokens.len() < 4 {  // auto name ; null_stmt
             return None;
@@ -453,7 +461,7 @@ struct ExternDeclarationNode {
 impl Parse for ExternDeclarationNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        use crate::token::DeclarationSpecifier::Extrn;
+        use token::DeclarationSpecifier::Extrn;
 
         if tokens.len() < 4 {  // extrn name ; null_stmt
             return None;
@@ -527,7 +535,7 @@ impl Parse for LabelDeclarationNode {
 
 fn extract_bracketed_rvalue(
     tokens: &[Token],
-    bracket_type: crate::token::BracketType,
+    bracket_type: token::BracketType,
 ) -> Option<(RvalueNode, usize)> {
     return if let Some(
         Token {
@@ -549,24 +557,677 @@ fn extract_bracketed_rvalue(
 }
 
 #[derive(Debug)]
-struct RvalueNode {}
+enum Lvalue {
+    Name(String),
+    DerefRvalue(Box<RvalueNode>),
+    Indexing { vector: Box<RvalueNode>, index: Box<RvalueNode> },
+}
+
+impl TryFrom<RvalueNode> for Lvalue {
+    type Error = ();
+
+    fn try_from(rvalue_node: RvalueNode) -> Result<Self, Self::Error> {
+        if let RvalueNode { rvalue: Rvalue::Lvalue(lvalue), .. } = rvalue_node {
+            Ok(lvalue)
+        } else {
+            Err(())
+        }
+    }
+}
+
+#[derive(Debug)]
+struct OperatorNode {}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+enum IncDecType {
+    Prefix,
+    Postfix,
+}
+
+#[derive(Debug)]
+enum IncDec {
+    Increment,
+    Decrement,
+}
+
+#[derive(Debug)]
+struct IncDecNode {
+    inc_or_dec: IncDec,
+    inc_dec_type: IncDecType,
+    lvalue: Lvalue,
+}
+
+#[derive(Debug)]
+enum Unary {
+    Plus,
+    Minus,
+    LogicalNot,
+    Complement,
+}
+
+// enum Expression {
+//     Primary(PrimaryExpression),
+//     Operator,
+// }
+//
+// impl Parse for Expression {
+//     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
+//         where Self: Sized {
+//         let primary_expr = PrimaryExpression::parse(tokens);
+//         if let Some((expr, adv)) = primary_expr {}
+//
+//         todo!()
+//     }
+// }
+
+#[derive(Debug)]
+enum PrimaryExpression {
+    Name(String),
+    Constant(Constant),
+    BracketedRvalue(Box<RvalueNode>),
+    Indexing { vector: Box<PrimaryExpressionAndPos>, index: Box<RvalueNode> },
+    FnCall { fn_name: Box<PrimaryExpressionAndPos>, arguments: Vec<Box<RvalueNode>> },
+}
+
+#[derive(Debug)]
+struct PrimaryExpressionAndPos {
+    prim_expr: PrimaryExpression,
+    position: TokenPos,
+}
+
+#[derive(Debug)]
+enum Rvalue {
+    Constant(Constant),
+    Lvalue(Lvalue),
+    Assign { lhs: Lvalue, op: token::Assign, rhs: Box<RvalueNode> },
+    IncDec(IncDecNode),
+    Unary(Unary, Box<RvalueNode>),
+    TakeAddress(Lvalue),
+    Binary { lhs: Box<RvalueNode>, op: token::RichBinaryOperation, rhs: Box<RvalueNode> },
+    ConditionalExpression {
+        condition: Box<RvalueNode>,
+        on_true: Box<RvalueNode>,
+        on_false: Box<RvalueNode>,
+    },
+    BracketedExpression(Box<RvalueNode>),
+    FunctionCall { fn_name: Box<RvalueNode>, arguments: Vec<Box<RvalueNode>> },
+}
+
+#[derive(Debug)]
+struct RvalueNode {
+    position: TokenPos,
+    rvalue: Rvalue,
+}
+
+impl RvalueNode {
+    fn to_truth_value(&self) -> Option<RvalueNode> {
+        todo!()
+    }
+
+    fn is_lvalue(&self) -> bool {
+        if let RvalueNode { rvalue: Rvalue::Lvalue(_), .. } = self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl From<PrimaryExpressionAndPos> for RvalueNode {
+    fn from(x: PrimaryExpressionAndPos) -> Self {
+        // fn extract_rvalue_node(x: PrimaryExpressionAndPos) -> Option<RvalueNode {
+        //     let rvalue_node= RvalueNode::from(x);
+        //     if let Some(rvalue_node) = rvalue_node {
+        //         Some(rvalue_node)
+        //     } else {
+        //         None
+        //     }
+        // }
+
+        let position = x.position;
+        match x.prim_expr {
+            PrimaryExpression::BracketedRvalue(br_rvalue) => {
+                RvalueNode {
+                    position,
+                    rvalue: Rvalue::BracketedExpression(br_rvalue),
+                }
+            }
+            PrimaryExpression::Constant(constant) =>
+                RvalueNode {
+                    position,
+                    rvalue: Rvalue::Constant(constant),
+                },
+            // PrimaryExpression::Indexing { vector, index } =>
+            // Ok(RvalueNode {
+            //     position,
+            //     rvalue: Rvalue::Indexing {
+            //         vector: Box::new({
+            //             if let Some(rvalue_node) = extract_rvalue_node(*vector) {
+            //                 rvalue_node
+            //             } else {
+            //                 return Err(());
+            //             }
+            //         }),
+            //         index,
+            //     },
+            // })
+            // ,
+            PrimaryExpression::FnCall { fn_name, arguments } =>
+                RvalueNode {
+                    position,
+                    rvalue: Rvalue::FunctionCall {
+                        fn_name: Box::new(RvalueNode::from(*fn_name)),
+                        arguments,
+                    },
+                },
+            _ => unreachable!(),
+        }
+    }
+}
 
 impl Parse for RvalueNode {
-    fn parse(tokens: &[Token]) -> Option<(Self, usize)>
+    fn parse(input: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        if tokens.is_empty() {
+        if input.is_empty() {
             return None;
         }
 
-        if tokens.len() == 1 {
-            return Some((RvalueNode {}, 1));
+        fn parse_primary_expressions(input: &[Token]) -> Option<Vec<TokenOrRvalueNode>> {
+            enum TokenOrPrimaryOrBracketedExpression {
+                Token(Token),
+                PrimaryExpression(PrimaryExpressionAndPos),
+                FunctionArgumentList(Vec<RvalueNode>),
+                SquareBracketedExpression(RvalueNode),
+            }
+
+            impl TokenOrPrimaryOrBracketedExpression {
+                fn is_lvalue(&self) -> bool {
+                    return if let TokenOrPrimaryOrBracketedExpression::PrimaryExpression(
+                        PrimaryExpressionAndPos { prim_expr, position }
+                    ) = self {
+                        match prim_expr {
+                            PrimaryExpression::Name(_) => true,
+                            PrimaryExpression::Indexing { .. } => true,
+                            _ => false
+                        }
+                    } else {
+                        false
+                    };
+                }
+            }
+
+            struct LvalueAndPos {
+                lvalue: Lvalue,
+                pos: TokenPos,
+            }
+
+            impl TryFrom<TokenOrPrimaryOrBracketedExpression> for LvalueAndPos {
+                type Error = ();
+
+                fn try_from(x: TokenOrPrimaryOrBracketedExpression) -> Result<Self, Self::Error> {
+                    return if let TokenOrPrimaryOrBracketedExpression::PrimaryExpression(
+                        PrimaryExpressionAndPos { prim_expr, position }
+                    ) = x {
+                        Ok(match prim_expr {
+                            PrimaryExpression::Name(name) =>
+                                LvalueAndPos {
+                                    lvalue: Lvalue::Name(name),
+                                    pos: position,
+                                },
+                            PrimaryExpression::Indexing { vector, index } =>
+                                LvalueAndPos {
+                                    lvalue: Lvalue::Indexing {
+                                        vector: Box::new(RvalueNode::try_from(*vector).unwrap()),
+                                        index,
+                                    },
+                                    pos: position,
+                                },
+                            _ => return Err(())
+                        })
+                    } else {
+                        Err(())
+                    };
+                }
+            }
+
+            impl TryFrom<TokenOrPrimaryOrBracketedExpression> for TokenOrRvalueNode {
+                type Error = ();
+
+                fn try_from(
+                    x: TokenOrPrimaryOrBracketedExpression
+                ) -> Result<Self, Self::Error> {
+                    if x.is_lvalue() {
+                        let lvalue_and_pos = LvalueAndPos::try_from(x).unwrap();
+                        return Ok(TokenOrRvalueNode::RvalueNode(
+                            RvalueNode {
+                                rvalue: Rvalue::Lvalue(lvalue_and_pos.lvalue),
+                                position: lvalue_and_pos.pos,
+                            }
+                        ));
+                    }
+
+                    match x {
+                        TokenOrPrimaryOrBracketedExpression::Token(t) =>
+                            Ok(TokenOrRvalueNode::Token(t)),
+                        TokenOrPrimaryOrBracketedExpression::PrimaryExpression(prim_expr_and_pos) => {
+                            if let Some(rvalue_node) = RvalueNode::try_from(prim_expr_and_pos).ok() {
+                                Ok(TokenOrRvalueNode::RvalueNode(rvalue_node))
+                            } else {
+                                return Err(());
+                            }
+                        }
+                        _ => return Err(())
+                    }
+                }
+            }
+
+            let mut toks_or_prim_or_br_exprs
+                = Vec::<TokenOrPrimaryOrBracketedExpression>::new();
+
+            let mut i: usize = 0;
+            while let Some(t) = input.get(i) {
+                let pos = t.pos;
+                match t.r#type {
+                    TokenType::Name =>
+                        toks_or_prim_or_br_exprs.push(
+                            TokenOrPrimaryOrBracketedExpression::PrimaryExpression(
+                                PrimaryExpressionAndPos {
+                                    prim_expr: PrimaryExpression::Name(t.val.as_ref().unwrap().clone()),
+                                    position: pos,
+                                })),
+                    TokenType::Constant(_) =>
+                        toks_or_prim_or_br_exprs.push(
+                            TokenOrPrimaryOrBracketedExpression::PrimaryExpression(
+                                PrimaryExpressionAndPos {
+                                    prim_expr: PrimaryExpression::Constant(
+                                        Constant::try_from(&input[i]).ok()?),
+                                    position: pos,
+                                })),
+                    TokenType::Bracket(br) => {
+                        if br.bracket_type == token::BracketType::Curly {
+                            return None;
+                        }
+
+                        fn extract_primary_expression_and_pos(x: TokenOrPrimaryOrBracketedExpression)
+                                                              -> Option<PrimaryExpressionAndPos> {
+                            if let TokenOrPrimaryOrBracketedExpression::PrimaryExpression(
+                                prim_expr_and_pos
+                            ) = x {
+                                Some(prim_expr_and_pos)
+                            } else {
+                                None
+                            }
+                        }
+
+                        let last_prim_expr_and_pos =
+                            if toks_or_prim_or_br_exprs.is_empty() {
+                                None
+                            } else {
+                                extract_primary_expression_and_pos(toks_or_prim_or_br_exprs.pop()?)
+                            };
+
+                        let (br_expr, adv) = BracketedExpression::parse(&input[i..])?;
+                        i += adv;
+
+                        if let Some(last_prim_expr_and_pos) = last_prim_expr_and_pos {
+                            toks_or_prim_or_br_exprs.push(TokenOrPrimaryOrBracketedExpression::PrimaryExpression(
+                                PrimaryExpressionAndPos {
+                                    position: last_prim_expr_and_pos.position,
+                                    prim_expr: match br_expr {
+                                        BracketedExpression::RoundBracketedExpression(single_arg) =>
+                                            PrimaryExpression::FnCall {
+                                                fn_name: Box::new(last_prim_expr_and_pos),
+                                                arguments: vec![Box::new(single_arg)],
+                                            },
+                                        BracketedExpression::FunctionArgumentList(fn_args) =>
+                                            PrimaryExpression::FnCall {
+                                                fn_name: Box::new(last_prim_expr_and_pos),
+                                                arguments: fn_args.into_iter()
+                                                    .map(|x| Box::new(x))
+                                                    .collect(),
+                                            },
+                                        BracketedExpression::SquareBracketedExpression(index) =>
+                                            PrimaryExpression::Indexing {
+                                                vector: Box::new(last_prim_expr_and_pos),
+                                                index: Box::new(index),
+                                            }
+                                    },
+                                }
+                            ));
+                            continue;
+                        }
+
+                        if let BracketedExpression::RoundBracketedExpression(br_rvalue) = br_expr {
+                            toks_or_prim_or_br_exprs.push(
+                                TokenOrPrimaryOrBracketedExpression::PrimaryExpression(
+                                    PrimaryExpressionAndPos {
+                                        position: br_rvalue.position,
+                                        prim_expr: PrimaryExpression::BracketedRvalue(
+                                            Box::new(br_rvalue)),
+                                    }
+                                )
+                            );
+                        } else {  // not_a_prim_expr [ ... ] | not_a_prim_expr ( ... , ... )
+                            return None;
+                        }
+
+                        continue;
+                    }
+                    TokenType::Colon | TokenType::QuestionMark | TokenType::Operator(_) =>
+                        toks_or_prim_or_br_exprs.push(
+                            TokenOrPrimaryOrBracketedExpression::Token(t.clone())),
+                    _ => return None,
+                }
+                i += 1;
+            }
+
+            let mut res = Vec::<TokenOrRvalueNode>::new();
+            for x in toks_or_prim_or_br_exprs {
+                res.push(if let Ok(x) = TokenOrRvalueNode::try_from(x) {
+                    x
+                } else {
+                    return None;
+                });
+            }
+            Some(res)
         }
 
+        let res = parse_primary_expressions(input)?;
+
+        fn parse_unary_operators(mut input: Vec<TokenOrRvalueNode>) -> Option<Vec<TokenOrRvalueNode>> {
+            use token::Operator;
+
+            fn op_may_be_both_binary_and_unary(op: Operator) -> bool {
+                match op {
+                    Operator::Plus | Operator::Minus
+                    | Operator::Asterisk | Operator::Ampersand => true,
+                    _ => false
+                }
+            }
+
+            fn op_may_be_postfix(op: Operator) -> bool {
+                match op {
+                    Operator::Inc | Operator::Dec => true,
+                    _ => false
+                }
+            }
+
+            fn op_may_be_prefix(op: Operator) -> bool {
+                match op {
+                    Operator::Inc | Operator::Dec
+                    | Operator::Plus | Operator::Minus
+                    | Operator::Asterisk | Operator::Ampersand | Operator::Unary(_) => true,
+
+                    _ => false
+                }
+            }
+
+            type PrefixOrPostfix = IncDecType;
+
+            fn unary_op_can_be_applied(
+                op: Operator,
+                rvalue_node: &RvalueNode,
+                prefix_or_postfix: PrefixOrPostfix,
+            ) -> bool {
+                if !(
+                    if prefix_or_postfix == PrefixOrPostfix::Postfix {
+                        op_may_be_postfix
+                    } else {
+                        op_may_be_prefix
+                    }(op)) {
+                    return false;
+                }
+
+                match op {
+                    Operator::Plus | Operator::Minus
+                    | Operator::Asterisk | Operator::Unary(_) => true,
+
+                    Operator::Ampersand | Operator::Inc | Operator::Dec => {
+                        if let RvalueNode { rvalue: Rvalue::Lvalue(_), .. } = rvalue_node {
+                            true
+                        } else {
+                            false
+                        }
+                    }
+
+                    Operator::Binary(_) | Operator::Assign(_) => false,
+                }
+            }
+
+            fn apply_unary_op(
+                op_and_pos: (Operator, TokenPos),
+                rvalue_node: RvalueNode,
+                prefix_or_postfix: PrefixOrPostfix,
+            ) -> RvalueNode {
+                let (op, position) = op_and_pos;
+                assert!(unary_op_can_be_applied(op, &rvalue_node, prefix_or_postfix));
+
+                use token::UnaryOperation;
+
+                match op {
+                    Operator::Plus =>
+                        RvalueNode {
+                            rvalue: Rvalue::Unary(Unary::Plus, Box::new(rvalue_node)),
+                            position,
+                        },
+                    Operator::Minus =>
+                        RvalueNode {
+                            rvalue: Rvalue::Unary(Unary::Minus, Box::new(rvalue_node)),
+                            position,
+                        },
+                    Operator::Asterisk =>
+                        RvalueNode {
+                            rvalue: Rvalue::Lvalue(
+                                Lvalue::DerefRvalue(Box::new(rvalue_node))
+                            ),
+                            position,
+                        },
+                    Operator::Ampersand =>
+                        RvalueNode {
+                            rvalue: Rvalue::TakeAddress(Lvalue::try_from(rvalue_node).unwrap()),
+                            position,
+                        },
+                    Operator::Unary(unary_op) =>
+                        match unary_op {
+                            UnaryOperation::LogicalNot =>
+                                RvalueNode {
+                                    rvalue: Rvalue::Unary(Unary::LogicalNot, Box::new(rvalue_node)),
+                                    position,
+                                },
+                            UnaryOperation::Complement =>
+                                RvalueNode {
+                                    rvalue: Rvalue::Unary(Unary::Complement, Box::new(rvalue_node)),
+                                    position,
+                                }
+                        },
+                    Operator::Inc =>
+                        RvalueNode {
+                            rvalue: Rvalue::IncDec(IncDecNode {
+                                inc_or_dec: IncDec::Increment,
+                                inc_dec_type: prefix_or_postfix,
+                                lvalue: Lvalue::try_from(rvalue_node).unwrap(),
+                            }),
+                            position,
+                        },
+                    Operator::Dec => RvalueNode {
+                        rvalue: Rvalue::IncDec(IncDecNode {
+                            inc_or_dec: IncDec::Decrement,
+                            inc_dec_type: prefix_or_postfix,
+                            lvalue: Lvalue::try_from(rvalue_node).unwrap(),
+                        }),
+                        position,
+                    },
+                    _ => unreachable!()
+                }
+            }
+
+            fn try_applying_unary_op_to_last_elem_of_vec(
+                op_and_pos: (Operator, TokenPos),
+                vec: &mut Vec<TokenOrRvalueNode>,
+                prefix_or_postfix: PrefixOrPostfix,
+            ) -> Option<RvalueNode> {
+                let (op, pos) = op_and_pos;
+                if let Some(
+                    TokenOrRvalueNode::RvalueNode(rvalue_node)
+                ) = vec.last() {
+                    if unary_op_can_be_applied(op,
+                                               rvalue_node,
+                                               prefix_or_postfix) {
+                        let op_node = apply_unary_op(
+                            op_and_pos,
+                            if let Some(
+                                TokenOrRvalueNode::RvalueNode(rvalue_node)
+                            ) = vec.pop() {
+                                rvalue_node
+                            } else {
+                                unreachable!()
+                            }, prefix_or_postfix);
+                        return Some(op_node);
+                    }
+                }
+                None
+            }
+
+            let mut res = Vec::<TokenOrRvalueNode>::new();
+            while let Some(tok_or_rvalue) = input.pop() {
+                match &tok_or_rvalue {
+                    TokenOrRvalueNode::Token(t) => {
+                        match t.r#type {
+                            TokenType::Operator(op) => {
+                                if op_may_be_both_binary_and_unary(op) {
+                                    let prev_tok = input.last();
+                                    match prev_tok {
+                                        None => (),
+                                        Some(TokenOrRvalueNode::RvalueNode(_)) => {
+                                            res.push(tok_or_rvalue);  // rvalue + ...
+                                            continue;
+                                        }
+                                        Some(TokenOrRvalueNode::Token(prev_tok)) => {
+                                            if let Ok(op) = Operator::try_from(prev_tok) {
+                                                if op_may_be_postfix(op) {  // a++ - ...
+                                                    res.push(tok_or_rvalue);  // - is binary
+                                                    continue;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                let op_node = (|| {
+                                    if op_may_be_prefix(op) {
+                                        let prefix_or_postfix = PrefixOrPostfix::Prefix;
+                                        if let Some(
+                                            op_node
+                                        ) = try_applying_unary_op_to_last_elem_of_vec((op, t.pos),
+                                                                                      &mut res,
+                                                                                      prefix_or_postfix) {
+                                            return Some(op_node);
+                                        }
+                                    }
+
+                                    if op_may_be_postfix(op) {
+                                        let prefix_or_postfix = PrefixOrPostfix::Postfix;
+                                        if let Some(
+                                            op_node
+                                        ) = try_applying_unary_op_to_last_elem_of_vec((op, t.pos),
+                                                                                      &mut input,
+                                                                                      prefix_or_postfix) {
+                                            return Some(op_node);
+                                        }
+                                    }
+
+                                    None
+                                })();
+
+                                res.push(TokenOrRvalueNode::RvalueNode(op_node?));
+                            }
+                            TokenType::Colon | TokenType::QuestionMark => res.push(tok_or_rvalue),
+                            _ => unreachable!()
+                        }
+                    }
+                    TokenOrRvalueNode::RvalueNode(_) => res.push(tok_or_rvalue),
+                }
+            }
+
+            res.reverse();
+            Some(res)
+        }
+
+        let res = parse_unary_operators(res);
+        dbg!(&res);
         todo!()
     }
 }
 
 impl ParseExact for RvalueNode {}
+
+#[derive(Debug)]
+enum BracketedExpression {
+    RoundBracketedExpression(RvalueNode),
+    // examples: (a), (a + b)
+    FunctionArgumentList(Vec<RvalueNode>),
+    // examples: (a, b, c), ()
+    SquareBracketedExpression(RvalueNode),
+}
+
+impl Parse for BracketedExpression {
+    fn parse(input: &[Token]) -> Option<(Self, usize)>
+        where Self: Sized {
+        if input.is_empty() {
+            return None;
+        }
+
+        fn parse_round_brackets_content(input: &[Token]) -> Option<BracketedExpression> {
+            if input.is_empty() {  // ( )
+                return Some(BracketedExpression::FunctionArgumentList(vec![]));
+            }
+
+            let mut arguments = Vec::<RvalueNode>::new();
+            let mut next_arg_idx: usize = 0;
+
+            for (i, t) in input.into_iter().enumerate() {
+                if t.r#type == TokenType::Comma {
+                    let arg = RvalueNode::parse_exact(&input[next_arg_idx..i])?;
+                    arguments.push(arg);
+                    next_arg_idx = i + 1;
+                }
+            }
+
+            if arguments.is_empty() {
+                let rvalue_node = RvalueNode::parse_exact(&input)?;
+                return Some(BracketedExpression::RoundBracketedExpression(rvalue_node));
+            }
+
+            return Some(BracketedExpression::FunctionArgumentList(arguments));
+        }
+
+        return if let TokenType::Bracket(br) = input[0].r#type {
+            let expr = extract_bracketed_expression(input)?;
+            let adv = 1 + expr.len() + 1;
+
+            use token::BracketType::*;
+            match br.bracket_type {
+                Round => {
+                    let node = parse_round_brackets_content(expr)?;
+                    Some((node, adv))
+                }
+                Square => {
+                    let node = RvalueNode::parse_exact(expr)?;
+                    Some((BracketedExpression::SquareBracketedExpression(node), adv))
+                }
+                Curly => None,
+            }
+        } else {
+            None
+        };
+    }
+}
+
+#[derive(Debug)]
+enum TokenOrRvalueNode {
+    Token(Token),
+    RvalueNode(RvalueNode),
+}
 
 #[derive(Debug)]
 struct SwitchStatementNode {
@@ -586,8 +1247,8 @@ struct SwitchStatementNode {
 impl Parse for SwitchStatementNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        use crate::token::ControlStatementIdentifier::Switch;
-        use crate::token::LEFT_ROUND_BRACKET;
+        use token::ControlStatementIdentifier::Switch;
+        use token::LEFT_ROUND_BRACKET;
 
         if tokens.len() < 5 {  // switch ( rvalue ) null_stmt
             return None;
@@ -641,7 +1302,7 @@ struct CaseStatementNode {
 impl Parse for CaseStatementNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        use crate::token::ControlStatementIdentifier::Case;
+        use token::ControlStatementIdentifier::Case;
 
         if tokens.len() < 4 {  // case const : null_stmt
             return None;
@@ -677,8 +1338,8 @@ struct IfStatementNode {
 impl Parse for IfStatementNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        use crate::token::ControlStatementIdentifier::{If, Else};
-        use crate::token::BracketType::Round;
+        use token::ControlStatementIdentifier::{If, Else};
+        use token::BracketType::Round;
 
         if tokens.len() < 5 {  // if ( rvalue ) ;
             return None;
@@ -737,17 +1398,14 @@ impl Parse for WhileNode {
 }
 
 fn extract_bracketed_expression(tokens: &[Token]) -> Option<&[Token]> {
-    use crate::token::LeftOrRight::Left;
-    use crate::token::Bracket;
+    use token::Bracket;
 
-    if tokens.len() < 2 {
-        return None;
-    }
+    const LEFT: token::LeftOrRight = token::LeftOrRight::Left;
 
     return if let Token {
-        r#type: TokenType::Bracket(Bracket { left_or_right: Left, .. }),
+        r#type: TokenType::Bracket(Bracket { left_or_right: LEFT, .. }),
         val, ..
-    } = &tokens[0] {
+    } = tokens.get(0)? {
         let right_br_pos = TokenPos::parse(val.as_ref()?)?;
         let right_br_idx = tokens.into_iter()
             .position(|t| t.pos == right_br_pos)?;
@@ -765,7 +1423,7 @@ struct CompoundStatementNode {
 impl Parse for CompoundStatementNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        use crate::token::LEFT_CURLY_BRACKET;
+        use token::LEFT_CURLY_BRACKET;
 
         if tokens.len() < 2 {
             return None;
@@ -813,8 +1471,8 @@ struct ReturnNode {
 impl Parse for ReturnNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        use crate::token::BracketType::Round;
-        use crate::token::ControlStatementIdentifier::Return;
+        use token::BracketType::Round;
+        use token::ControlStatementIdentifier::Return;
 
         if tokens.is_empty() {
             return None;

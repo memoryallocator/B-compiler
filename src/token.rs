@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use std::fmt;
 
 use crate::lexical_analyzer::TokenPos;
@@ -29,7 +30,6 @@ impl Bracket {
         Bracket {
             left_or_right: LeftOrRight::Left,
             bracket_type: BracketType::Round,
-
         }
     }
 
@@ -37,7 +37,6 @@ impl Bracket {
         Bracket {
             left_or_right: LeftOrRight::Right,
             bracket_type: BracketType::Round,
-
         }
     }
 
@@ -45,7 +44,6 @@ impl Bracket {
         Bracket {
             left_or_right: LeftOrRight::Left,
             bracket_type: BracketType::Square,
-
         }
     }
 
@@ -53,7 +51,6 @@ impl Bracket {
         Bracket {
             left_or_right: LeftOrRight::Right,
             bracket_type: BracketType::Square,
-
         }
     }
 
@@ -61,7 +58,6 @@ impl Bracket {
         Bracket {
             left_or_right: LeftOrRight::Left,
             bracket_type: BracketType::Curly,
-
         }
     }
 
@@ -159,7 +155,8 @@ pub(crate) enum RichBinaryOperation {
     Add,
     Sub,
     Mul,
-    And,
+    BitwiseAnd,
+    LogicalAnd,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
@@ -182,6 +179,23 @@ pub(crate) enum DeclarationSpecifier {
 }
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, Hash)]
+pub(crate) struct Assign {
+    bin_op: Option<RichBinaryOperation>,
+}
+
+impl From<Option<RichBinaryOperation>> for Assign {
+    fn from(bin_op: Option<RichBinaryOperation>) -> Self {
+        Assign { bin_op }
+    }
+}
+
+impl From<RichBinaryOperation> for Assign {
+    fn from(bin_op: RichBinaryOperation) -> Self {
+        Assign::from(Some(bin_op))
+    }
+}
+
+#[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, Hash)]
 pub(crate) enum Operator {
     Plus,
     Minus,
@@ -189,9 +203,20 @@ pub(crate) enum Operator {
     Ampersand,
     Unary(UnaryOperation),
     Binary(BinaryOperation),
-    Assign(Option<RichBinaryOperation>),
+    Assign(Assign),
     Inc,
     Dec,
+}
+
+impl TryFrom<&Token> for Operator {
+    type Error = ();
+
+    fn try_from(x: &Token) -> Result<Self, Self::Error> {
+        if let Token { r#type: TokenType::Operator(op), .. } = x {
+            return Ok(*op);
+        }
+        Err(())
+    }
 }
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, Hash)]

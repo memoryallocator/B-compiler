@@ -62,7 +62,7 @@ fn main() {
         process::exit(1);
     });
 
-    assert!(source_code.chars().all(|c| c.is_ascii()), "Source code file must be in ASCII");
+    assert!(source_code.chars().all(|c| c.is_ascii()), "The source code file must be in ASCII");
 
     let mut lexical_analyzer = lexical_analyzer::LexicalAnalyzer {
         compiler_options: &compiler_options,

@@ -47,8 +47,9 @@ impl TokenPos {
     }
 }
 
-impl TokenPos {
-    pub(crate) fn from(line: usize, column: usize) -> Self {
+impl From<(usize, usize)> for TokenPos {
+    fn from(line_and_column: (usize, usize)) -> Self {
+        let (line, column) = line_and_column;
         TokenPos { line, column }
     }
 }
@@ -78,7 +79,7 @@ fn parse_binary_operator<'a, I>(op: I) -> Option<(crate::token::RichBinaryOperat
             ['<', '='] => (RegularBinary(Cmp(Le)), 2),
             ['>', '='] => (RegularBinary(Cmp(Ge)), 2),
 
-            ['&', _] => (And, 1),
+            ['&', _] => (BitwiseAnd, 1),
             ['|', _] => (RegularBinary(Or), 1),
             ['^', _] => (RegularBinary(Xor), 1),
 
@@ -102,19 +103,20 @@ fn parse_operator<'a, I>(op: I) -> Option<(crate::token::Operator, usize)>
     use crate::token::BinaryOperation::*;
     use crate::token::BinaryRelation::*;
     use crate::token::RichBinaryOperation::*;
+    use crate::token::Assign as AssignStruct;
 
     let s: Vec<char> = op.take(3).collect();
     return Some(
         match s[..3] {
-            ['=', '=', '='] => (Assign(Some(RegularBinary(Cmp(Eq)))), 3),
+            ['=', '=', '='] => (Assign(AssignStruct::from(RegularBinary(Cmp(Eq)))), 3),
             ['=', '=', _] => (Binary(Cmp(Eq)), 2),
 
             ['=', _, _] => {
                 if let Some((rich_bin_op, rich_bin_op_len)) = parse_binary_operator(
                     s[1..].into_iter().cloned()) {
-                    (Assign(Some(rich_bin_op)), 1 + rich_bin_op_len)
+                    (Assign(AssignStruct::from(rich_bin_op)), 1 + rich_bin_op_len)
                 } else {
-                    (Assign(None), 1)
+                    (Assign(AssignStruct::from(None)), 1)
                 }
             }
 
@@ -154,10 +156,28 @@ impl LexicalAnalyzer<'_> {
         let mut curr_line_started_at: usize = 0;
         let mut currently_reading: Option<Constant> = None;
 
-        let read_name = |s: &str| s.chars()
-            .into_iter()
-            .take_while(|c| c.is_ascii_alphanumeric() || ['_', '.'].contains(c))
-            .collect::<String>();
+        fn read_name(s: &str) -> Option<(String, bool)> {
+            let first_symbol = s.chars().nth(0)?;
+            if !first_symbol.is_ascii_alphabetic()
+                && first_symbol != '_' {
+                return None;
+            }
+
+            let mut contains_dot = false;
+            let mut res = String::new();
+
+            for c in s.chars() {
+                if c.is_ascii_alphanumeric() || c == '_' {
+                    res.push(c);
+                } else if c == '.' {
+                    contains_dot = true;
+                    res.push(c);
+                } else {
+                    break;
+                }
+            }
+            Some((res, contains_dot))
+        }
 
         while i < source_code.len() {
             let token_pos = TokenPos { line: line_no, column: i - curr_line_started_at + 1 };
@@ -217,8 +237,7 @@ impl LexicalAnalyzer<'_> {
                         if let Some(_) = currently_reading {
                             buffer.push(curr_char);
                         } else {
-                            {
-                                let word = read_name(&source_code[i..]);
+                            if let Some((word, contains_dot)) = read_name(&source_code[i..]) {
                                 let word_len = word.len();
                                 if word_len > 0 {
                                     if let Some(
@@ -230,6 +249,11 @@ impl LexicalAnalyzer<'_> {
                                             pos: token_pos,
                                         });
                                     } else {
+                                        if contains_dot {
+                                            return Err(format!(
+                                                "{}: the only place where the dot symbol is allowed is rd.unit, wr.unit variables' names",
+                                                token_pos));
+                                        }
                                         res.push(Token {
                                             val: Some(word),
                                             r#type: TokenType::Name,

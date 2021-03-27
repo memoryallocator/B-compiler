@@ -12,5 +12,5 @@ main() {
     {
         ;
     }
-    return ( 0 ) ;
+    return ( a++ + ++b + 0 + ~!*c++ + ++d + &e - --f + g + h-- * i ) ;
 }

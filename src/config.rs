@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 
 use crate::symbol::SymbolType;
 use crate::token::ControlStatementIdentifier::*;
@@ -16,6 +17,15 @@ pub(crate) enum Arch {
     x86_64,
 }
 
+impl fmt::Display for Arch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Arch::x86_32 => write!(f, "x86-32"),
+            Arch::x86_64 => write!(f, "x86-64"),
+        }
+    }
+}
+
 #[warn(non_camel_case_types)]
 pub(crate) enum PlatformName {
     Linux,
@@ -24,43 +34,64 @@ pub(crate) enum PlatformName {
     MacOs,
 }
 
+impl fmt::Display for PlatformName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PlatformName::Linux => write!(f, "Linux"),
+            PlatformName::Bsd => write!(f, "BSD"),
+            PlatformName::Windows => write!(f, "Windows"),
+            PlatformName::MacOs => write!(f, "macOS"),
+        }
+    }
+}
+
 pub(crate) struct TargetPlatform {
     pub(crate) platform_name: PlatformName,
     pub(crate) arch: Arch,
 }
 
-impl Default for TargetPlatform {
-    fn default() -> Self {
-        Self {
-            platform_name: {
-                #[cfg(any(
-                target_os = "freebsd",
-                target_os = "dragonfly",
-                target_os = "openbsd",
-                target_os = "netbsd"
-                ))] {
-                    PlatformName::Bsd
-                }
-                #[cfg(target_os = "linux")] {
-                    PlatformName::Linux
-                }
-                #[cfg(target_os = "windows")] {
-                    PlatformName::Windows
-                }
-                #[cfg(target_os = "macos")] {
-                    PlatformName::MacOs
-                }
+impl TargetPlatform {
+    fn native() -> Self {
+        TargetPlatform {
+            platform_name: if cfg!(any
+            (target_os = "freebsd",
+            target_os = "dragonfly",
+            target_os = "openbsd",
+            target_os = "netbsd")
+            ) {
+                PlatformName::Bsd
+            } else if cfg!(target_os = "linux") {
+                PlatformName::Linux
+            } else if cfg!(target_os = "windows") {
+                PlatformName::Windows
+            } else if cfg!(target_os = "macos") {
+                PlatformName::MacOs
+            } else {
+                let default_platform = TargetPlatform::default().platform_name;
+                println!("Failed to determine the native OS. Assuming it's {}", default_platform);
+                default_platform
             },
             arch: {
-                #[cfg(target_pointer_width = "32")] {
+                if cfg!(target_pointer_width = "32") {
                     Arch::x86_32
-                }
-                #[cfg(target_pointer_width = "64")] {
+                } else if cfg!(target_pointer_width = "64") {
                     Arch::x86_64
+                } else {
+                    let default_arch = TargetPlatform::default().arch;
+                    println!("Failed to determine the native architecture. Assuming it's {}", default_arch);
+                    default_arch
                 }
             },
         }
-        // eprintln!("Unknown platform. Assuming it's 64-bit Linux")
+    }
+}
+
+impl Default for TargetPlatform {
+    fn default() -> Self {
+        TargetPlatform {
+            platform_name: PlatformName::Linux,
+            arch: Arch::x86_64,
+        }
     }
 }
 
@@ -82,24 +113,27 @@ pub(crate) fn get_second_symbol_of_escape_sequence_to_character_mapping() -> Has
     ].into_iter().collect()
 }
 
-pub(crate) type SymbolTable = HashMap<String, SymbolType>;
+pub(crate) type SymbolTable = HashMap<String,
+    SymbolType>;
 
 pub(crate) fn get_default_symbols() -> SymbolTable {
-    // use std::ops::RangeInclusive;
+    use crate::symbol::SymbolType::Reserved;
 
     let mut res = Vec::<(&str, SymbolType)>::new();
+    res.push(("rd.unit", Reserved(TokenType::Name)));
+    res.push(("wr.unit", Reserved(TokenType::Name)));
     {
         let mut keywords: Vec<(&str, SymbolType)> = vec![
-            ("auto", SymbolType::Reserved(TokenType::DeclarationSpecifier(Auto))),
-            ("extrn", SymbolType::Reserved(TokenType::DeclarationSpecifier(Extrn))),
-            ("goto", SymbolType::Reserved(TokenType::ControlStatement(Goto))),
-            ("switch", SymbolType::Reserved(TokenType::ControlStatement(Switch))),
-            ("case", SymbolType::Reserved(TokenType::ControlStatement(Case))),
-            ("return", SymbolType::Reserved(TokenType::ControlStatement(Return))),
-            ("if", SymbolType::Reserved(TokenType::ControlStatement(If))),
-            ("else", SymbolType::Reserved(TokenType::ControlStatement(Else))),
-            ("while", SymbolType::Reserved(TokenType::ControlStatement(While))),
-            ("break", SymbolType::Reserved(TokenType::ControlStatement(Break))),
+            ("auto", Reserved(TokenType::DeclarationSpecifier(Auto))),
+            ("extrn", Reserved(TokenType::DeclarationSpecifier(Extrn))),
+            ("goto", Reserved(TokenType::ControlStatement(Goto))),
+            ("switch", Reserved(TokenType::ControlStatement(Switch))),
+            ("case", Reserved(TokenType::ControlStatement(Case))),
+            ("return", Reserved(TokenType::ControlStatement(Return))),
+            ("if", Reserved(TokenType::ControlStatement(If))),
+            ("else", Reserved(TokenType::ControlStatement(Else))),
+            ("while", Reserved(TokenType::ControlStatement(While))),
+            ("break", Reserved(TokenType::ControlStatement(Break))),
             // ("for", SymbolType::Reserved(TokenType::ControlStatement(For))),
         ];
         res.append(&mut keywords);
