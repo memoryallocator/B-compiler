@@ -6,6 +6,7 @@ use crate::parser::ast::*;
 use crate::token::{Token, TokenType};
 
 mod ast;
+mod expression_parser;
 
 pub(crate) struct Parser<'a> {
     pub(crate) compiler_options: CompilerOptions,
@@ -110,6 +111,7 @@ impl Parser<'_> {
     // }
 
     fn postprocess(&mut self, root: &ProgramNode) -> Result<Vec<Warning>, String> {
+        dbg!(&root);
         todo!()
     }
 
@@ -144,10 +146,6 @@ impl Parser<'_> {
         let prog_node = prog_node.unwrap();
 
         let warnings = self.postprocess(&prog_node);
-        if let Err(err_msg) = warnings {
-            return Err(err_msg);
-        }
-
-        Ok((prog_node, &self.symbol_table, warnings.unwrap()))
+        Ok((prog_node, &self.symbol_table, warnings?))
     }
 }
