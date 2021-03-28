@@ -29,18 +29,31 @@ impl Parse for BracketedExpression {
                 return Some(BracketedExpression::FunctionArgumentList(vec![]));
             }
 
-            let mut arguments = Vec::<RvalueNode>::new();
-            let mut next_arg_idx: usize = 0;
-
-            for (i, t) in input.into_iter().enumerate() {
-                if t.r#type == TokenType::Comma {
-                    let arg = RvalueNode::parse_exact(&input[next_arg_idx..i])?;
-                    arguments.push(arg);
-                    next_arg_idx = i + 1;
-                }
+            let single_rvalue = RvalueNode::parse_exact(input);
+            if let Some(single_rvalue) = single_rvalue {
+                return Some(BracketedExpression::RoundBracketedExpression(single_rvalue));
             }
 
-            let last_rvalue = RvalueNode::parse_exact(&input[next_arg_idx..])?;
+            // use token::LEFT_ROUND_BRACKET;
+
+            let mut arguments = Vec::<RvalueNode>::new();
+            let mut arg_starts_from: usize = 0;
+
+            // let mut i: usize = 0;
+            // while i < input.len() {
+            for (i, t) in input.into_iter().enumerate() {
+                // let t = &input[i];
+
+                if let TokenType::Comma = t.r#type {
+                    let arg = RvalueNode::parse_exact(&input[arg_starts_from..i])?;
+                    arguments.push(arg);
+                    arg_starts_from = i + 1;
+                }
+
+                // i += 1;
+            }
+
+            let last_rvalue = RvalueNode::parse_exact(&input[arg_starts_from..])?;
             return if arguments.is_empty() {
                 Some(BracketedExpression::RoundBracketedExpression(last_rvalue))
             } else {
@@ -132,17 +145,15 @@ impl Parse for RvalueNode {
         use token::Operator;
 
         fn parse_primary_expressions(input: &[Token]) -> Option<Vec<TokenOrRvalueNode>> {
-            enum TokenOrPrimaryOrBracketedExpression {
+            enum TokenOrPrimaryExpression {
                 Token(Token),
                 PrimaryExpression(PrimaryExpressionAndPos),
-                FunctionArgumentList(Vec<RvalueNode>),
-                SquareBracketedExpression(RvalueNode),
             }
 
-            impl TokenOrPrimaryOrBracketedExpression {
+            impl TokenOrPrimaryExpression {
                 fn is_lvalue(&self) -> bool {
-                    return if let TokenOrPrimaryOrBracketedExpression::PrimaryExpression(
-                        PrimaryExpressionAndPos { prim_expr, position }
+                    return if let TokenOrPrimaryExpression::PrimaryExpression(
+                        PrimaryExpressionAndPos { prim_expr, .. }
                     ) = self {
                         match prim_expr {
                             PrimaryExpression::Name(_) => true,
@@ -160,11 +171,11 @@ impl Parse for RvalueNode {
                 pos: TokenPos,
             }
 
-            impl TryFrom<TokenOrPrimaryOrBracketedExpression> for LvalueAndPos {
+            impl TryFrom<TokenOrPrimaryExpression> for LvalueAndPos {
                 type Error = ();
 
-                fn try_from(x: TokenOrPrimaryOrBracketedExpression) -> Result<Self, Self::Error> {
-                    return if let TokenOrPrimaryOrBracketedExpression::PrimaryExpression(
+                fn try_from(x: TokenOrPrimaryExpression) -> Result<Self, Self::Error> {
+                    return if let TokenOrPrimaryExpression::PrimaryExpression(
                         PrimaryExpressionAndPos { prim_expr, position }
                     ) = x {
                         Ok(match prim_expr {
@@ -189,11 +200,11 @@ impl Parse for RvalueNode {
                 }
             }
 
-            impl TryFrom<TokenOrPrimaryOrBracketedExpression> for TokenOrRvalueNode {
+            impl TryFrom<TokenOrPrimaryExpression> for TokenOrRvalueNode {
                 type Error = ();
 
                 fn try_from(
-                    x: TokenOrPrimaryOrBracketedExpression
+                    x: TokenOrPrimaryExpression
                 ) -> Result<Self, Self::Error> {
                     if x.is_lvalue() {
                         let lvalue_and_pos = LvalueAndPos::try_from(x).unwrap();
@@ -204,42 +215,49 @@ impl Parse for RvalueNode {
                     }
 
                     match x {
-                        TokenOrPrimaryOrBracketedExpression::Token(t) =>
+                        TokenOrPrimaryExpression::Token(t) =>
                             Ok(TokenOrRvalueNode::Token(t)),
-                        TokenOrPrimaryOrBracketedExpression::PrimaryExpression(prim_expr_and_pos) => {
+
+                        TokenOrPrimaryExpression::PrimaryExpression(
+                            prim_expr_and_pos
+                        ) => {
                             if let Some(rvalue_node) = RvalueNode::try_from(prim_expr_and_pos).ok() {
                                 Ok(TokenOrRvalueNode::RvalueNode(rvalue_node))
                             } else {
                                 return Err(());
                             }
                         }
-                        _ => return Err(())
                     }
                 }
             }
 
             let mut toks_or_prim_or_br_exprs
-                = Vec::<TokenOrPrimaryOrBracketedExpression>::new();
+                = Vec::<TokenOrPrimaryExpression>::new();
 
             let mut i: usize = 0;
             while let Some(t) = input.get(i) {
                 let pos = t.pos;
+
                 match t.r#type {
-                    TokenType::Name =>
+                    TokenType::Name => {
                         toks_or_prim_or_br_exprs.push(
-                            TokenOrPrimaryOrBracketedExpression::PrimaryExpression(
+                            TokenOrPrimaryExpression::PrimaryExpression(
                                 PrimaryExpressionAndPos {
                                     prim_expr: PrimaryExpression::Name(t.val.as_ref().unwrap().clone()),
                                     position: pos,
-                                })),
-                    TokenType::Constant(_) =>
+                                }))
+                    }
+
+                    TokenType::Constant(_) => {
                         toks_or_prim_or_br_exprs.push(
-                            TokenOrPrimaryOrBracketedExpression::PrimaryExpression(
+                            TokenOrPrimaryExpression::PrimaryExpression(
                                 PrimaryExpressionAndPos {
                                     prim_expr: PrimaryExpression::Constant(
                                         Constant::try_from(&input[i]).ok()?),
                                     position: pos,
-                                })),
+                                }))
+                    }
+
                     TokenType::Bracket(br) => {
                         if br.bracket_type == token::BracketType::Curly {
                             return None;
@@ -247,9 +265,9 @@ impl Parse for RvalueNode {
 
                         let last_prim_expr_and_pos =
                             match toks_or_prim_or_br_exprs.last() {
-                                Some(TokenOrPrimaryOrBracketedExpression::PrimaryExpression(_)) =>
+                                Some(TokenOrPrimaryExpression::PrimaryExpression(_)) =>
                                     Some(
-                                        if let TokenOrPrimaryOrBracketedExpression::PrimaryExpression(
+                                        if let TokenOrPrimaryExpression::PrimaryExpression(
                                             prim_expr_and_pos
                                         ) = toks_or_prim_or_br_exprs.pop()? {
                                             prim_expr_and_pos
@@ -264,7 +282,7 @@ impl Parse for RvalueNode {
                         i += adv;
 
                         if let Some(last_prim_expr_and_pos) = last_prim_expr_and_pos {
-                            toks_or_prim_or_br_exprs.push(TokenOrPrimaryOrBracketedExpression::PrimaryExpression(
+                            toks_or_prim_or_br_exprs.push(TokenOrPrimaryExpression::PrimaryExpression(
                                 PrimaryExpressionAndPos {
                                     position: last_prim_expr_and_pos.position,
                                     prim_expr: match br_expr {
@@ -295,7 +313,7 @@ impl Parse for RvalueNode {
 
                         if let BracketedExpression::RoundBracketedExpression(br_rvalue) = br_expr {
                             toks_or_prim_or_br_exprs.push(
-                                TokenOrPrimaryOrBracketedExpression::PrimaryExpression(
+                                TokenOrPrimaryExpression::PrimaryExpression(
                                     PrimaryExpressionAndPos {
                                         position: br_rvalue.get_position(),
                                         prim_expr: PrimaryExpression::BracketedRvalue(
@@ -311,7 +329,7 @@ impl Parse for RvalueNode {
                     }
                     TokenType::Colon | TokenType::QuestionMark | TokenType::Operator(_) =>
                         toks_or_prim_or_br_exprs.push(
-                            TokenOrPrimaryOrBracketedExpression::Token(t.clone())),
+                            TokenOrPrimaryExpression::Token(t.clone())),
                     _ => return None,
                 }
                 i += 1;
@@ -460,7 +478,7 @@ impl Parse for RvalueNode {
                 vec: &mut Vec<TokenOrRvalueNode>,
                 prefix_or_postfix: PrefixOrPostfix,
             ) -> Option<RvalueNode> {
-                let (op, pos) = op_and_pos;
+                let (op, _) = op_and_pos;
                 if let Some(
                     TokenOrRvalueNode::RvalueNode(rvalue_node)
                 ) = vec.last() {
@@ -891,6 +909,15 @@ impl Parse for RvalueNode {
                                 if let Some(
                                     TokenOrRvalueNode::RvalueNode(condition)
                                 ) = input.pop() {
+                                    let condition =
+                                        if let Some(
+                                            truth_value
+                                        ) = condition.to_truth_value() {
+                                            truth_value
+                                        } else {
+                                            condition
+                                        };
+
                                     input.push(TokenOrRvalueNode::RvalueNode(
                                         RvalueNode::from(
                                             (t.pos,

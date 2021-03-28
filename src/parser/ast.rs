@@ -1,4 +1,3 @@
-use core::slice::Iter;
 use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::rc::Rc;
@@ -53,7 +52,7 @@ impl Parse for Ival {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Constant {
     constant_type: token::Constant,
     value: String,
@@ -234,11 +233,16 @@ fn parse_name_list(tokens: &[Token]) -> Option<Vec<String>> {
                         r#type: TokenType::Name,
                         val: name, ..
                     }) = tokens.get(name_idx) {
+            let name = name.as_ref().unwrap().clone();
             let comma_idx = name_idx + 1;
+
             match tokens.get(comma_idx) {
-                None => return Some(res),  // end of input, matched "[name_list ,] name"
                 Some(Token { r#type: TokenType::Comma, .. }) => {  // OK, matched "name ,"
-                    res.push(name.as_ref().unwrap().clone());
+                    res.push(name);
+                }
+                None => {  // end of input, matched "[name_list ,] name"
+                    res.push(name);
+                    return Some(res);
                 }
                 Some(_) => return None,  // the next symbol is not a comma
             }
@@ -259,11 +263,12 @@ pub(crate) struct FunctionDefinitionNode {
 impl Parse for FunctionDefinitionNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        use token::{LEFT_ROUND_BRACKET, RIGHT_ROUND_BRACKET};
-
         if tokens.len() < 4 {
             return None;
         }
+
+        use token::{LEFT_ROUND_BRACKET, RIGHT_ROUND_BRACKET};
+
         match &tokens[..2] {
             [Token {
                 r#type: TokenType::Name,
@@ -388,11 +393,11 @@ struct AutoDeclarationNode {
 impl Parse for AutoDeclarationNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        use token::DeclarationSpecifier::Auto;
-
         if tokens.len() < 4 {  // auto name ; null_stmt
             return None;
         }
+
+        use token::DeclarationSpecifier::Auto;
 
         return if let Some(
             Token { r#type: TokenType::DeclarationSpecifier(Auto), pos, .. }
@@ -404,7 +409,8 @@ impl Parse for AutoDeclarationNode {
                     return None;
                 };
 
-            if semicolon_pos >= tokens.len() {  // actually, == would work
+            let next_statement_starts_at = semicolon_pos + 1;
+            if tokens.len() <= next_statement_starts_at {
                 return None;
             }
 
@@ -418,12 +424,12 @@ impl Parse for AutoDeclarationNode {
 
             if let Some(
                 (stmt_node, adv)
-            ) = StatementNode::parse(&tokens[semicolon_pos + 1..]) {
+            ) = StatementNode::parse(&tokens[next_statement_starts_at..]) {
                 Some((AutoDeclarationNode {
                     position: *pos,
                     declarations,
                     next_statement: Box::new(stmt_node),
-                }, semicolon_pos + 1 + adv))
+                }, next_statement_starts_at + adv))
             } else {
                 None
             }
@@ -472,11 +478,11 @@ struct ExternDeclarationNode {
 impl Parse for ExternDeclarationNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        use token::DeclarationSpecifier::Extrn;
-
         if tokens.len() < 4 {  // extrn name ; null_stmt
             return None;
         }
+
+        use token::DeclarationSpecifier::Extrn;
 
         return if let Some(
             Token { r#type: TokenType::DeclarationSpecifier(Extrn), .. }
@@ -495,14 +501,18 @@ impl Parse for ExternDeclarationNode {
                 return None;
             }
 
-            if semicolon_pos >= tokens.len() {  // actually, == would work
+            let next_statement_starts_at = semicolon_pos + 1;
+            if tokens.len() <= next_statement_starts_at {
                 return None;
             }
-            if let Some((next_stmt, adv)) = StatementNode::parse(&tokens[semicolon_pos..]) {
+
+            if let Some(
+                (next_stmt, adv)
+            ) = StatementNode::parse(&tokens[next_statement_starts_at..]) {
                 Some((ExternDeclarationNode {
                     names,
                     next_statement: Box::new(next_stmt),
-                }, semicolon_pos + adv))
+                }, next_statement_starts_at + adv))
             } else {
                 None
             }
@@ -567,7 +577,7 @@ fn extract_bracketed_rvalue(
     };
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Lvalue {
     Name(String),
     DerefRvalue(Box<RvalueNode>),
@@ -586,22 +596,19 @@ impl TryFrom<RvalueNode> for Lvalue {
     }
 }
 
-#[derive(Debug)]
-struct OperatorNode {}
-
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub(crate) enum IncDecType {
     Prefix,
     Postfix,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum IncDec {
     Increment,
     Decrement,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct IncDecNode {
     inc_or_dec: IncDec,
     inc_dec_type: IncDecType,
@@ -615,7 +622,7 @@ impl From<(IncDec, IncDecType, Lvalue)> for IncDecNode {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Unary {
     Plus,
     Minus,
@@ -638,7 +645,7 @@ pub(crate) enum Unary {
 //     }
 // }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Rvalue {
     Constant(Constant),
     Lvalue(Lvalue),
@@ -657,7 +664,7 @@ pub(crate) enum Rvalue {
     FunctionCall { fn_name: Box<RvalueNode>, arguments: Vec<Box<RvalueNode>> },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct RvalueNode {
     position: TokenPos,
     pub(crate) rvalue: Rvalue,
@@ -675,23 +682,113 @@ impl RvalueNode {
         self.position
     }
 
-    fn to_truth_value(&self) -> Option<RvalueNode> {
-        todo!()
-    }
+    pub(crate) fn to_truth_value(&self) -> Option<RvalueNode> {
+        use token::{RichBinaryOperation, BinaryOperation};
 
-    fn is_lvalue(&self) -> bool {
-        if let RvalueNode { rvalue: Rvalue::Lvalue(_), .. } = self {
-            true
-        } else {
-            false
+        match &self.rvalue {
+            Rvalue::Constant(_) => Some(self.clone()),
+            Rvalue::Lvalue(lvalue) =>
+                if let Lvalue::Name(_) = lvalue {
+                    Some(self.clone())
+                } else {
+                    None
+                },
+            Rvalue::Binary {
+                lhs,
+                bin_op,
+                rhs
+            } => {
+                match bin_op {
+                    RichBinaryOperation::LogicalAnd => Some(self.clone()),
+
+                    RichBinaryOperation::RegularBinary(BinaryOperation::Or) => {
+                        let lhs = Box::new(lhs.to_truth_value()?);
+                        let rhs = Box::new(rhs.to_truth_value()?);
+                        let bin_op = *bin_op;
+
+                        Some(RvalueNode::from(
+                            (self.position,
+                             Rvalue::Binary {
+                                 lhs,
+                                 bin_op,
+                                 rhs,
+                             })))
+                    }
+                    RichBinaryOperation::BitwiseAnd => {
+                        let lhs = Box::new(lhs.to_truth_value()?);
+                        let rhs = Box::new(rhs.to_truth_value()?);
+
+                        Some(RvalueNode::from(
+                            (self.position,
+                             Rvalue::Binary {
+                                 lhs,
+                                 bin_op: RichBinaryOperation::LogicalAnd,
+                                 rhs,
+                             })))
+                    }
+                    _ => return None,
+                }
+            }
+
+            Rvalue::ConditionalExpression {
+                condition,
+                on_true,
+                on_false,
+                colon_pos
+            } => {
+                let condition = Box::new(condition.to_truth_value()?);
+                let on_true = on_true.clone();
+                let on_false = on_false.clone();
+                let colon_pos = *colon_pos;
+
+                Some(
+                    RvalueNode::from(
+                        (self.position,
+                         Rvalue::ConditionalExpression {
+                             condition,
+                             on_true,
+                             on_false,
+                             colon_pos,
+                         })
+                    ))
+            }
+
+            Rvalue::BracketedExpression(br_expr) =>
+                Some(
+                    RvalueNode::from(
+                        (self.position,
+                         Rvalue::BracketedExpression(
+                             Box::new(br_expr.to_truth_value()?)
+                         ))
+                    )
+                ),
+
+            Rvalue::Unary(Unary::LogicalNot, rvalue_node) => {
+                Some(
+                    RvalueNode::from(
+                        (self.position,
+                         Rvalue::Unary(Unary::LogicalNot,
+                                       Box::new(rvalue_node.to_truth_value()?)))
+                    )
+                )
+            }
+            _ => None
         }
     }
+
+    // fn is_lvalue(&self) -> bool {
+    //     if let RvalueNode { rvalue: Rvalue::Lvalue(_), .. } = self {
+    //         true
+    //     } else {
+    //         false
+    //     }
+    // }
 }
 
 impl ParseExact for RvalueNode {}
 
 #[derive(Debug)]
-struct SwitchStatementNode {
+struct SwitchNode {
     rvalue: RvalueNode,
     body: Box<StatementNode>,
     cases: RefCell<Vec<Constant>>,
@@ -705,7 +802,7 @@ struct SwitchStatementNode {
 //     }
 // }
 
-impl Parse for SwitchStatementNode {
+impl Parse for SwitchNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
         use token::ControlStatementIdentifier::Switch;
@@ -736,7 +833,7 @@ impl Parse for SwitchStatementNode {
                 let toks_consumed = right_br_idx + 1 + adv;
                 let body = Box::new(body);
 
-                Some((SwitchStatementNode {
+                Some((SwitchNode {
                     rvalue,
                     body,
                     cases: RefCell::default(),
@@ -749,7 +846,7 @@ impl Parse for SwitchStatementNode {
 }
 
 #[derive(Debug)]
-struct CaseStatementNode {
+struct CaseNode {
     constant: Constant,
     next_statement: Box<StatementNode>,
 }
@@ -760,7 +857,7 @@ struct CaseStatementNode {
 //     }
 // }
 
-impl Parse for CaseStatementNode {
+impl Parse for CaseNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
         use token::ControlStatementIdentifier::Case;
@@ -782,7 +879,7 @@ impl Parse for CaseStatementNode {
         let (next_stmt, adv) = StatementNode::parse(&tokens[3..])?;
         let toks_consumed = 3 + adv;  // case const : adv
 
-        Some((CaseStatementNode {
+        Some((CaseNode {
             constant,
             next_statement: Box::new(next_stmt),
         }, toks_consumed))
@@ -790,13 +887,13 @@ impl Parse for CaseStatementNode {
 }
 
 #[derive(Debug)]
-struct IfStatementNode {
+struct IfNode {
     condition: RvalueNode,
     body: Box<StatementNode>,
     else_body: Option<Box<StatementNode>>,
 }
 
-impl Parse for IfStatementNode {
+impl Parse for IfNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
         use token::ControlStatementIdentifier::{If, Else};
@@ -810,8 +907,16 @@ impl Parse for IfStatementNode {
             return None;
         }
 
-        let (condition, adv) = extract_bracketed_rvalue(&tokens[1..], Round)?;
+        let (condition, adv) = extract_bracketed_rvalue(&tokens[1..],
+                                                        Round)?;
         let mut toks_consumed = 1 + adv;
+
+        let condition =
+            if let Some(truth_value) = condition.to_truth_value() {
+                truth_value
+            } else {
+                condition
+            };
 
         let (body, adv) = StatementNode::parse(&tokens[toks_consumed..])?;
         let body = Box::new(body);
@@ -837,7 +942,7 @@ impl Parse for IfStatementNode {
                 None
             };
 
-        Some((IfStatementNode {
+        Some((IfNode {
             condition,
             body,
             else_body,
@@ -854,7 +959,39 @@ struct WhileNode {
 impl Parse for WhileNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        todo!()
+        if tokens.len() < 5 {  // while ( x ) ;
+            return None;
+        }
+
+        use token::ControlStatementIdentifier::While;
+        use token::BracketType::Round;
+
+        if tokens[0].r#type != TokenType::ControlStatement(While) {
+            return None;
+        }
+
+        let (condition, adv) = extract_bracketed_rvalue(&tokens[1..],
+                                                        Round)?;
+        let mut toks_consumed = 1 + adv;
+
+        let condition =
+            if let Some(truth_value) = condition.to_truth_value() {
+                truth_value
+            } else {
+                condition
+            };
+
+        if tokens.len() <= toks_consumed {
+            return None;
+        }
+
+        let (body, adv) = StatementNode::parse(&tokens[toks_consumed..])?;
+        toks_consumed += adv;
+
+        return Some((WhileNode {
+            condition,
+            body: Box::new(body),
+        }, toks_consumed));
     }
 }
 
@@ -917,13 +1054,30 @@ impl Parse for CompoundStatementNode {
 
 #[derive(Debug)]
 struct GotoNode {
-    label_name: String,
+    label: RvalueNode,
 }
 
 impl Parse for GotoNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        todo!()
+        if tokens.len() < 3 {  // goto label ;
+            return None;
+        }
+
+        use token::ControlStatementIdentifier::Goto;
+
+        if tokens[0].r#type != TokenType::ControlStatement(Goto) {
+            return None;
+        }
+
+        let semicolon_pos = get_semicolon_pos(tokens)?;
+        let toks_consumed = semicolon_pos + 1;
+
+        let rvalue = &tokens[1..semicolon_pos];
+
+        return Some((GotoNode {
+            label: RvalueNode::parse_exact(&rvalue)?
+        }, toks_consumed));
     }
 }
 
@@ -966,11 +1120,23 @@ struct RvalueAndSemicolonNode {
     rvalue: RvalueNode
 }
 
-// impl SetParent for RvalueAndSemicolonNode {
-//     fn set_parent(&mut self, parent: Weak<AbstractSyntaxNode>) -> Result<(), String> {
-//         self.rvalue.set_parent(parent)
-//     }
-// }
+impl Parse for RvalueAndSemicolonNode {
+    fn parse(input: &[Token]) -> Option<(Self, usize)>
+        where Self: Sized {
+        if input.len() < 2 {  // x ;
+            return None;
+        }
+
+        let semicolon_pos = get_semicolon_pos(input)?;
+        let toks_consumed = semicolon_pos + 1;
+
+        let rvalue = &input[..semicolon_pos];
+
+        return Some((RvalueAndSemicolonNode {
+            rvalue: RvalueNode::parse_exact(&rvalue)?
+        }, toks_consumed));
+    }
+}
 
 #[derive(Debug)]
 enum Statement {
@@ -980,9 +1146,9 @@ enum Statement {
     ExternDeclaration(ExternDeclarationNode),
     LabelDeclaration(LabelDeclarationNode),
     Return(ReturnNode),
-    Switch(SwitchStatementNode),
-    Case(CaseStatementNode),
-    If(IfStatementNode),
+    Switch(SwitchNode),
+    Case(CaseNode),
+    If(IfNode),
     While(WhileNode),
     Goto(GotoNode),
     RvalueAndSemicolon(RvalueAndSemicolonNode),
@@ -999,43 +1165,61 @@ impl Parse for Statement {
             return Some((Statement::NullStatement, 1));
         }
 
-        if let Some((comp_stmt, adv)) = CompoundStatementNode::parse(tokens) {
-            return Some((Statement::Compound(comp_stmt), adv));
-        }
-
-        if let Some((auto_decl, adv)) = AutoDeclarationNode::parse(tokens) {
-            return Some((Statement::AutoDeclaration(auto_decl), adv));
-        }
-
-        if let Some((extern_decl, adv)) = ExternDeclarationNode::parse(tokens) {
-            return Some((Statement::ExternDeclaration(extern_decl), adv));
-        }
-
-        if let Some((label_decl, adv)) = LabelDeclarationNode::parse(tokens) {
-            return Some((Statement::LabelDeclaration(label_decl), adv));
-        }
-
-        if let Some((switch, adv)) = SwitchStatementNode::parse(tokens) {
-            return Some((Statement::Switch(switch), adv));
-        }
-
-        if let Some((case, adv)) = CaseStatementNode::parse(tokens) {
-            return Some((Statement::Case(case), adv));
+        if let Some(
+            (rv_and_semicolon, adv)
+        ) = RvalueAndSemicolonNode::parse(tokens) {
+            return Some((Statement::RvalueAndSemicolon(rv_and_semicolon), adv));
         }
 
         if let Some((r#return, adv)) = ReturnNode::parse(tokens) {
             return Some((Statement::Return(r#return), adv));
         }
 
+        if let Some((r#if, adv)) = IfNode::parse(tokens) {
+            return Some((Statement::If(r#if), adv));
+        }
+
         if let Some((r#while, adv)) = WhileNode::parse(tokens) {
             return Some((Statement::While(r#while), adv));
+        }
+
+        if let Some(
+            (comp_stmt, adv)
+        ) = CompoundStatementNode::parse(tokens) {
+            return Some((Statement::Compound(comp_stmt), adv));
+        }
+
+        if let Some((switch, adv)) = SwitchNode::parse(tokens) {
+            return Some((Statement::Switch(switch), adv));
+        }
+
+        if let Some((case, adv)) = CaseNode::parse(tokens) {
+            return Some((Statement::Case(case), adv));
+        }
+
+        if let Some(
+            (auto_decl, adv)
+        ) = AutoDeclarationNode::parse(tokens) {
+            return Some((Statement::AutoDeclaration(auto_decl), adv));
+        }
+
+        if let Some(
+            (extern_decl, adv)
+        ) = ExternDeclarationNode::parse(tokens) {
+            return Some((Statement::ExternDeclaration(extern_decl), adv));
         }
 
         if let Some((goto, adv)) = GotoNode::parse(tokens) {
             return Some((Statement::Goto(goto), adv));
         }
 
-        todo!()
+        if let Some(
+            (label_decl, adv)
+        ) = LabelDeclarationNode::parse(tokens) {
+            return Some((Statement::LabelDeclaration(label_decl), adv));
+        }
+
+        None
     }
 }
 
@@ -1113,12 +1297,6 @@ pub(crate) struct ProgramNode {
 }
 
 impl ProgramNode {
-    pub(crate) fn get_definitions(&self) -> Iter<DefinitionNode> {
-        self.definitions.iter()
-    }
-}
-
-impl ProgramNode {
     pub fn new() -> Self {
         ProgramNode::default()
     }
@@ -1132,9 +1310,7 @@ impl From<Vec<DefinitionNode>> for ProgramNode {
 
 impl Default for ProgramNode {
     fn default() -> Self {
-        ProgramNode {
-            definitions: Vec::default()
-        }
+        ProgramNode { definitions: Vec::default() }
     }
 }
 

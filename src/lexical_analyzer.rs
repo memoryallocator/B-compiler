@@ -2,9 +2,11 @@ use std::collections::HashMap;
 use std::fmt;
 use std::string::String;
 
+use token::{Token, TokenType};
+
 use crate::config::{CompilerOptions, SymbolTable};
 use crate::generate_error_message_with_pos;
-use crate::token::{Token, TokenType};
+use crate::token;
 
 pub(crate) struct LexicalAnalyzer<'a> {
     pub(crate) compiler_options: &'a CompilerOptions,
@@ -60,32 +62,28 @@ impl fmt::Display for TokenPos {
     }
 }
 
-fn parse_binary_operator<'a, I>(op: I) -> Option<(crate::token::RichBinaryOperation, usize)>
+fn parse_binary_operator<'a, I>(op: I) -> Option<(token::RichBinaryOperation, usize)>
     where I: Iterator<Item=char> {
-    use crate::token::BinaryOperation::*;
-    use crate::token::BinaryRelation::*;
-    use crate::token::RichBinaryOperation::*;
-    use crate::token::LeftOrRight::*;
+    use token::BinaryOperation::*;
+    use token::BinaryRelation::*;
+    use token::RichBinaryOperation::*;
+    use token::LeftOrRight::*;
 
     let s: Vec<char> = op.take(2).collect();
     return Some(
         match s[..2] {
             ['=', '='] => (RegularBinary(Cmp(Eq)), 2),
             ['!', '='] => (RegularBinary(Cmp(Ne)), 2),
-
             ['<', '<'] => (RegularBinary(Shift(Left)), 2),
             ['>', '>'] => (RegularBinary(Shift(Right)), 2),
-
             ['<', '='] => (RegularBinary(Cmp(Le)), 2),
             ['>', '='] => (RegularBinary(Cmp(Ge)), 2),
-
             ['&', _] => (BitwiseAnd, 1),
             ['|', _] => (RegularBinary(Or), 1),
             ['^', _] => (RegularBinary(Xor), 1),
 
             ['+', _] => (Add, 1),
             ['-', _] => (Sub, 1),
-
             ['<', _] => (RegularBinary(Cmp(Lt)), 1),
             ['>', _] => (RegularBinary(Cmp(Gt)), 1),
 
@@ -97,22 +95,27 @@ fn parse_binary_operator<'a, I>(op: I) -> Option<(crate::token::RichBinaryOperat
     );
 }
 
-fn parse_operator<'a, I>(op: I) -> Option<(crate::token::Operator, usize)>
+fn parse_operator<'a, I>(op: I) -> Option<(token::Operator, usize)>
     where I: Iterator<Item=char> {
-    use crate::token::Operator::*;
-    use crate::token::BinaryOperation::*;
-    use crate::token::BinaryRelation::*;
-    use crate::token::RichBinaryOperation::*;
-    use crate::token::Assign as AssignStruct;
+    use token::Operator::*;
+    use token::UnaryOperation::*;
+    use token::BinaryOperation::*;
+    use token::BinaryRelation::*;
+    use token::RichBinaryOperation::*;
+    use token::Assign as AssignStruct;
 
     let s: Vec<char> = op.take(3).collect();
     return Some(
         match s[..3] {
             ['=', '=', '='] => (Assign(AssignStruct::from(RegularBinary(Cmp(Eq)))), 3),
             ['=', '=', _] => (Binary(Cmp(Eq)), 2),
+            ['!', '=', _] => (Binary(Cmp(Ne)), 2),
+            ['!', _, _] => (Unary(LogicalNot), 1),
 
             ['=', _, _] => {
-                if let Some((rich_bin_op, rich_bin_op_len)) = parse_binary_operator(
+                if let Some(
+                    (rich_bin_op, rich_bin_op_len)
+                ) = parse_binary_operator(
                     s[1..].into_iter().cloned()) {
                     (Assign(AssignStruct::from(rich_bin_op)), 1 + rich_bin_op_len)
                 } else {
@@ -145,9 +148,9 @@ fn parse_operator<'a, I>(op: I) -> Option<(crate::token::Operator, usize)>
 impl LexicalAnalyzer<'_> {
     fn tokenize(&self, source_code: &str) -> Result<Vec<Token>, String> {
         use crate::symbol::SymbolType;
-        use crate::token::{Constant, Bracket};
-        use crate::token::Operator::*;
-        use crate::token::UnaryOperation::*;
+        use token::{Constant, Bracket};
+        use token::Operator::*;
+        use token::UnaryOperation::*;
 
         let mut res = Vec::<Token>::new();
         let mut buffer = String::new();
@@ -245,7 +248,11 @@ impl LexicalAnalyzer<'_> {
                                     ) = self.keywords.get(&word) {
                                         res.push(Token {
                                             r#type: token_type.clone(),
-                                            val: None,
+                                            val: if *token_type != TokenType::Name {
+                                                None
+                                            } else {
+                                                Some(word)
+                                            },
                                             pos: token_pos,
                                         });
                                     } else {
@@ -336,11 +343,6 @@ impl LexicalAnalyzer<'_> {
                                         })
                                     }
                                 }
-                                '!' => res.push(Token {
-                                    r#type: TokenType::Operator(Unary(LogicalNot)),
-                                    val: None,
-                                    pos: token_pos,
-                                }),
                                 '~' => res.push(Token {
                                     r#type: TokenType::Operator(Unary(Complement)),
                                     val: None,
