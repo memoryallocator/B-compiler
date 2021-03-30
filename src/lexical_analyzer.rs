@@ -1,58 +1,78 @@
-use std::collections::HashMap;
-use std::fmt;
-use std::string::String;
+use cell::RefCell;
+use collections::HashMap;
+use convert::TryFrom;
+use rc::Rc;
+use std::*;
 
 use token::{Token, TokenType};
 
-use crate::config::{CompilerOptions, SymbolTable};
+use crate::config::{CompilerOptions, ReservedSymbolsTable};
 use crate::generate_error_message_with_pos;
 use crate::token;
 
 pub(crate) struct LexicalAnalyzer<'a> {
     pub(crate) compiler_options: &'a CompilerOptions,
     pub(crate) second_symbol_of_escape_sequence_to_character_mapping: &'a HashMap<char, char>,
-    pub(crate) keywords: &'a SymbolTable,
+    pub(crate) reserved_symbols: &'a ReservedSymbolsTable,
 }
 
-#[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Copy, Debug, Hash)]
+#[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Debug)]
 pub(crate) struct TokenPos {
-    pub(crate) line: usize,
-    pub(crate) column: usize,
+    line: usize,
+    column: usize,
+    repr_cache: RefCell<Option<Rc<String>>>,
 }
 
 impl TokenPos {
-    pub(crate) fn repr(&self) -> String {
-        format!("{},{}", self.line, self.column)
-    }
+    pub(crate) fn repr(&self) -> Rc<String> {
+        if self.repr_cache.borrow().is_none() {
+            *self.repr_cache.borrow_mut() = Some(Rc::new(
+                format!("{},{}", self.line, self.column)));
+        }
 
-    pub(crate) fn parse<T: AsRef<str>>(s: T) -> Option<Self> {
-        let line_and_col: Vec::<&str> = s.as_ref().split(',').collect();
-        if line_and_col.len() != 2 {
-            return None;
-        }
-        match line_and_col[..2] {
-            [line, col] => {
-                let line = line.parse::<usize>();
-                let column = col.parse::<usize>();
-                if line.is_ok() && column.is_ok() {
-                    let line = line.unwrap();
-                    let column = column.unwrap();
-                    return Some(TokenPos {
-                        line,
-                        column,
-                    });
-                }
-            }
-            _ => unreachable!()
-        }
-        None
+        self.repr_cache.borrow().as_ref().unwrap().clone()
     }
 }
 
 impl From<(usize, usize)> for TokenPos {
     fn from(line_and_column: (usize, usize)) -> Self {
         let (line, column) = line_and_column;
-        TokenPos { line, column }
+        TokenPos { line, column, repr_cache: RefCell::new(None) }
+    }
+}
+
+impl TryFrom<Rc<String>> for TokenPos {
+    type Error = ();
+
+    fn try_from(s: Rc<String>) -> Result<Self, Self::Error> {
+        let line_and_col: Vec<&str> =
+            s.as_ref()
+                .split(',')
+                .collect();
+
+        if line_and_col.len() != 2 {
+            return Err(());
+        }
+
+        match line_and_col[..2] {
+            [line, col] => {
+                let line = line.parse::<usize>();
+                let column = col.parse::<usize>();
+
+                if line.is_ok() && column.is_ok() {
+                    let line = line.unwrap();
+                    let column = column.unwrap();
+                    return Ok(TokenPos {
+                        line,
+                        column,
+                        repr_cache: RefCell::new(Some(s)),
+                    });
+                }
+            }
+            _ => unreachable!()
+        }
+
+        Err(())
     }
 }
 
@@ -147,7 +167,7 @@ fn parse_operator<'a, I>(op: I) -> Option<(token::Operator, usize)>
 
 impl LexicalAnalyzer<'_> {
     fn tokenize(&self, source_code: &str) -> Result<Vec<Token>, String> {
-        use crate::symbol::SymbolType;
+        // use crate::symbol::SymbolType;
         use token::{Constant, Bracket};
         use token::Operator::*;
         use token::UnaryOperation::*;
@@ -159,39 +179,32 @@ impl LexicalAnalyzer<'_> {
         let mut curr_line_started_at: usize = 0;
         let mut currently_reading: Option<Constant> = None;
 
-        fn read_name(s: &str) -> Option<(String, bool)> {
+        fn read_name(s: &str) -> Option<String> {
             let first_symbol = s.chars().nth(0)?;
-            if !first_symbol.is_ascii_alphabetic()
-                && first_symbol != '_' {
+            if first_symbol.is_ascii_digit() {
                 return None;
             }
 
-            let mut contains_dot = false;
-            let mut res = String::new();
+            let res = s.chars()
+                .into_iter()
+                .take_while(|c| c.is_ascii_alphanumeric() || ['_', '.'].contains(c))
+                .collect();
 
-            for c in s.chars() {
-                if c.is_ascii_alphanumeric() || c == '_' {
-                    res.push(c);
-                } else if c == '.' {
-                    contains_dot = true;
-                    res.push(c);
-                } else {
-                    break;
-                }
-            }
-            Some((res, contains_dot))
+            Some(res)
         }
 
         while i < source_code.len() {
-            let token_pos = TokenPos { line: line_no, column: i - curr_line_started_at + 1 };
+            let token_pos = TokenPos::from((line_no, i - curr_line_started_at + 1));
             let curr_char = source_code.chars().nth(i).unwrap_or_default();
+
             if curr_char == '\n' {
                 curr_line_started_at = i + 1;
                 line_no += 1;
             } else {
                 match curr_char {
                     '\'' | '"' => {
-                        let this_literal_type = if curr_char == '"' { Constant::String } else { Constant::Char };
+                        let this_literal_type =
+                            if curr_char == '"' { Constant::String } else { Constant::Char };
                         match currently_reading {
                             None => {
                                 res.push(Token {
@@ -206,7 +219,7 @@ impl LexicalAnalyzer<'_> {
                                     buffer.push(curr_char);
                                 } else {
                                     let token = res.last_mut().unwrap();
-                                    (*token).val = Some(buffer.clone());
+                                    (*token).val = Some(Rc::new(buffer.clone()));
                                     buffer.clear();
                                     currently_reading = None;
                                 }
@@ -214,7 +227,7 @@ impl LexicalAnalyzer<'_> {
                         }
                     }
                     '*' =>
-                        if currently_reading == None {
+                        if currently_reading.is_none() {
                             res.push(Token {
                                 r#type: TokenType::Operator(Asterisk),
                                 val: None,
@@ -229,45 +242,40 @@ impl LexicalAnalyzer<'_> {
                                             buffer.push(curr_char);
                                             buffer.push(next_char);
                                         }
-                                        Some(processed_escape_seq) => buffer.push(*processed_escape_seq),
+                                        Some(processed_escape_seq) =>
+                                            buffer.push(*processed_escape_seq),
                                     }
+
                                     i += 2;
                                     continue;
                                 }
                             }
                         }
+
                     _ =>
                         if let Some(_) = currently_reading {
                             buffer.push(curr_char);
                         } else {
-                            if let Some((word, contains_dot)) = read_name(&source_code[i..]) {
-                                let word_len = word.len();
-                                if word_len > 0 {
+                            if let Some(name) = read_name(&source_code[i..]) {
+                                let name_len = name.len();
+
+                                if name_len > 0 {
                                     if let Some(
-                                        SymbolType::Reserved(token_type)
-                                    ) = self.keywords.get(&word) {
+                                        reserved_name
+                                    ) = self.reserved_symbols.get(&name) {
                                         res.push(Token {
-                                            r#type: token_type.clone(),
-                                            val: if *token_type != TokenType::Name {
-                                                None
-                                            } else {
-                                                Some(word)
-                                            },
+                                            r#type: TokenType::ReservedName(*reserved_name),
+                                            val: None,
                                             pos: token_pos,
                                         });
                                     } else {
-                                        if contains_dot {
-                                            return Err(format!(
-                                                "{}: the only place where the dot symbol is allowed is rd.unit, wr.unit variables' names",
-                                                token_pos));
-                                        }
                                         res.push(Token {
-                                            val: Some(word),
+                                            val: Some(Rc::new(name)),
                                             r#type: TokenType::Name,
                                             pos: token_pos,
                                         });
                                     }
-                                    i += word_len;
+                                    i += name_len;
                                     continue;
                                 }
                             }
@@ -301,9 +309,10 @@ impl LexicalAnalyzer<'_> {
                                                 } else {
                                                     Constant::Decimal
                                                 }),
-                                            val: Some(number_as_str),
+                                            val: Some(Rc::new(number_as_str)),
                                             pos: token_pos,
                                         });
+
                                     i += number_len;
                                     continue;
                                 }
@@ -315,6 +324,7 @@ impl LexicalAnalyzer<'_> {
                                                 val: None,
                                                 pos: token_pos,
                                             });
+
                                             i += 2;
                                             continue;
                                         }
@@ -333,6 +343,7 @@ impl LexicalAnalyzer<'_> {
                                                 val: None,
                                                 pos: token_pos,
                                             });
+
                                             i += 2;
                                             continue;
                                         }
@@ -391,7 +402,7 @@ impl LexicalAnalyzer<'_> {
             return Err(generate_error_message_with_pos(
                 format!("expected {} (opening literal found in {}), found end of file",
                         literal, res.last().unwrap().pos),
-                TokenPos { line: line_no, column: 0 }));
+                TokenPos::from((line_no, 0))));
         }
         Ok(res)
     }
@@ -423,20 +434,17 @@ impl LexicalAnalyzer<'_> {
                     '\'' =>
                         if !string && res.chars().last().unwrap_or('\0') != '*' {
                             if !char {
-                                opening_literal_pos = Some(TokenPos {
-                                    line: line_no,
-                                    column: i - curr_line_started_at + 1,
-                                })
+                                opening_literal_pos = Some(TokenPos::from((
+                                    line_no, i - curr_line_started_at + 1)));
                             }
                             char = !char;
                         }
                     '"' =>
                         if !char && res.chars().last().unwrap_or('\0') != '*' {
                             if !string {
-                                opening_literal_pos = Some(TokenPos {
-                                    line: line_no,
-                                    column: i - curr_line_started_at + 1,
-                                });
+                                opening_literal_pos = Some(TokenPos::from((
+                                    line_no, i - curr_line_started_at + 1
+                                )));
                             }
                             string = !string;
                         }
@@ -466,14 +474,14 @@ impl LexicalAnalyzer<'_> {
         }
         if comment {
             return Err(generate_error_message_with_pos("expected */, found end of file",
-                                                       TokenPos { line: line_no, column: 0 }));
+                                                       TokenPos::from((line_no, 0))));
         }
         if char || string {
             let literal = if char { '\'' } else { '"' };
             return Err(generate_error_message_with_pos(
-                format!("expected {} (opening literal found in line {}, column {}), found end of file",
-                        literal, opening_literal_pos.unwrap().line, opening_literal_pos.unwrap().column),
-                TokenPos { line: line_no, column: 0 }));
+                format!("expected {} (opening literal found in {}), found end of file",
+                        literal, opening_literal_pos.unwrap()),
+                TokenPos::from((line_no, 0))));
         }
         res.shrink_to_fit();
         Ok(res)
@@ -492,7 +500,7 @@ impl LexicalAnalyzer<'_> {
 mod tests {
     use std::borrow::Borrow;
 
-    use crate::config::{get_default_symbols, get_second_symbol_of_escape_sequence_to_character_mapping};
+    use crate::config::{get_reserved_symbols, get_second_symbol_of_escape_sequence_to_character_mapping};
 
     use super::*;
 
@@ -502,7 +510,7 @@ mod tests {
         panic_msg: Option<Z>,
         scan_first: bool,
         compiler_options: &CompilerOptions,
-        keywords: &SymbolTable,
+        keywords: &ReservedSymbolsTable,
         second_symbol_of_escape_sequence_to_character_mapping: &HashMap<char, char>,
     ) -> Result<(), String> {
         let inp = inp.as_ref();
@@ -510,7 +518,7 @@ mod tests {
         let mut la = LexicalAnalyzer {
             compiler_options,
             second_symbol_of_escape_sequence_to_character_mapping,
-            keywords,
+            reserved_symbols: keywords,
         };
 
         let mut after_scan: String;
@@ -549,11 +557,11 @@ mod tests {
         let exp_out = exp_out.borrow();
         let co = CompilerOptions::default();
         let esm = get_second_symbol_of_escape_sequence_to_character_mapping();
-        let kw = get_default_symbols();
+        let kw = get_reserved_symbols();
         let la = LexicalAnalyzer {
             compiler_options: &co,
             second_symbol_of_escape_sequence_to_character_mapping: &esm,
-            keywords: &kw,
+            reserved_symbols: &kw,
         };
 
         let res = la.remove_comments(inp)?;

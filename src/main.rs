@@ -1,14 +1,13 @@
-use std::borrow::Borrow;
-use std::process;
+use borrow::Borrow;
+use process;
+use std::*;
 
-use crate::config::{get_default_symbols, get_second_symbol_of_escape_sequence_to_character_mapping};
-use crate::config::CompilerOptions;
+use crate::config::*;
 
 mod token;
 mod lexical_analyzer;
 mod parser;
 mod config;
-mod symbol;
 
 fn generate_error_message_with_pos<T: Borrow<str>, U: Borrow<lexical_analyzer::TokenPos>>(
     error_str: T,
@@ -67,7 +66,7 @@ fn main() {
     let mut lexical_analyzer = lexical_analyzer::LexicalAnalyzer {
         compiler_options: &compiler_options,
         second_symbol_of_escape_sequence_to_character_mapping: &get_second_symbol_of_escape_sequence_to_character_mapping(),
-        keywords: &get_default_symbols(),
+        reserved_symbols: &get_reserved_symbols(),
     };
     let tokens = lexical_analyzer.run(&source_code).unwrap_or_else(
         |err| {
@@ -78,9 +77,14 @@ fn main() {
     let mut parser = parser::Parser {
         compiler_options,
         source_code: Some(&source_code),
-        symbol_table: get_default_symbols(),
+        standard_library_names: &get_standard_library_names(),
     };
-    let (ast, sym_tab, warnings) = parser.run(&tokens).unwrap_or_else(
+
+    let (warnings, ast_and_scope_table) = parser.run(&tokens);
+    for warning in warnings {
+        println!("{}", warning);
+    }
+    let (ast, scope_table) = ast_and_scope_table.unwrap_or_else(
         |err| {
             eprintln!("Parser returned an error: {}", err);
             process::exit(1);

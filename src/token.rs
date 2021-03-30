@@ -1,5 +1,6 @@
-use std::convert::TryFrom;
-use std::fmt;
+use convert::TryFrom;
+use rc::Rc;
+use std::*;
 
 use crate::lexical_analyzer::TokenPos;
 
@@ -10,7 +11,7 @@ pub(crate) const LEFT_SQUARE_BRACKET: TokenType = TokenType::Bracket(Bracket::le
 pub(crate) const RIGHT_SQUARE_BRACKET: TokenType = TokenType::Bracket(Bracket::right_square_bracket());
 
 pub(crate) const LEFT_CURLY_BRACKET: TokenType = TokenType::Bracket(Bracket::left_curly_bracket());
-pub(crate) const RIGHT_CURLY_BRACKET: TokenType = TokenType::Bracket(Bracket::left_curly_bracket());
+// pub(crate) const RIGHT_CURLY_BRACKET: TokenType = TokenType::Bracket(Bracket::right_curly_bracket());
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
 pub(crate) enum BracketType {
@@ -61,12 +62,12 @@ impl Bracket {
         }
     }
 
-    pub(crate) const fn right_curly_bracket() -> Bracket {
-        Bracket {
-            left_or_right: LeftOrRight::Right,
-            bracket_type: BracketType::Curly,
-        }
-    }
+    // pub(crate) const fn right_curly_bracket() -> Bracket {
+    //     Bracket {
+    //         left_or_right: LeftOrRight::Right,
+    //         bracket_type: BracketType::Curly,
+    //     }
+    // }
 
     pub(crate) fn paired_bracket(b: &Bracket) -> Bracket {
         use LeftOrRight::*;
@@ -219,18 +220,23 @@ impl TryFrom<&Token> for Operator {
     }
 }
 
-#[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug, Hash)]
-pub(crate) enum TokenType {
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub(crate) enum ReservedName {
     ControlStatement(ControlStatementIdentifier),
     DeclarationSpecifier(DeclarationSpecifier),
+}
+
+#[derive(Eq, PartialEq, Copy, Clone, Debug)]
+pub(crate) enum TokenType {
+    ReservedName(ReservedName),
     Operator(Operator),
-    Name,
-    Constant(Constant),
     Comma,
     Semicolon,
     Colon,
     Bracket(Bracket),
     QuestionMark,
+    Name,
+    Constant(Constant),
 }
 
 impl fmt::Display for TokenType {
@@ -239,10 +245,10 @@ impl fmt::Display for TokenType {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug, Hash)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Token {
     pub(crate) r#type: TokenType,
-    pub(crate) val: Option<String>,
+    pub(crate) val: Option<Rc<String>>,
     pub(crate) pos: TokenPos,
 }
 

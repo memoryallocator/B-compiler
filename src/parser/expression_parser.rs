@@ -1,5 +1,7 @@
-use std::collections::VecDeque;
-use std::convert::TryFrom;
+use collections::VecDeque;
+use convert::TryFrom;
+use rc::Rc;
+use std::*;
 
 use token::{Token, TokenType};
 
@@ -10,10 +12,8 @@ use super::ast::*;
 
 #[derive(Debug)]
 enum BracketedExpression {
-    RoundBracketedExpression(RvalueNode),
-    // examples: (a), (a + b)
-    FunctionArgumentList(Vec<RvalueNode>),
-    // examples: (a, b, c), ()
+    RoundBracketedExpression(RvalueNode),  // examples: (a), (a + b)
+    FunctionArgumentList(Vec<RvalueNode>),  // examples: (a, b, c), ()
     SquareBracketedExpression(RvalueNode),
 }
 
@@ -90,16 +90,16 @@ enum TokenOrRvalueNode {
     RvalueNode(RvalueNode),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum PrimaryExpression {
-    Name(String),
+    Name(Rc<String>),
     Constant(Constant),
     BracketedRvalue(Box<RvalueNode>),
     Indexing { vector: Box<PrimaryExpressionAndPos>, index: Box<RvalueNode> },
     FnCall { fn_name: Box<PrimaryExpressionAndPos>, arguments: Vec<Box<RvalueNode>> },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PrimaryExpressionAndPos {
     prim_expr: PrimaryExpression,
     position: TokenPos,
@@ -236,7 +236,7 @@ impl Parse for RvalueNode {
 
             let mut i: usize = 0;
             while let Some(t) = input.get(i) {
-                let pos = t.pos;
+                let pos = t.pos.clone();
 
                 match t.r#type {
                     TokenType::Name => {
@@ -284,17 +284,16 @@ impl Parse for RvalueNode {
                         if let Some(last_prim_expr_and_pos) = last_prim_expr_and_pos {
                             toks_or_prim_or_br_exprs.push(TokenOrPrimaryExpression::PrimaryExpression(
                                 PrimaryExpressionAndPos {
-                                    position: last_prim_expr_and_pos.position,
                                     prim_expr: match br_expr {
                                         BracketedExpression::RoundBracketedExpression(single_arg) =>
                                             PrimaryExpression::FnCall {
-                                                fn_name: Box::new(last_prim_expr_and_pos),
+                                                fn_name: Box::new(last_prim_expr_and_pos.clone()),
                                                 arguments: vec![Box::new(single_arg)],
                                             },
 
                                         BracketedExpression::FunctionArgumentList(fn_args) =>
                                             PrimaryExpression::FnCall {
-                                                fn_name: Box::new(last_prim_expr_and_pos),
+                                                fn_name: Box::new(last_prim_expr_and_pos.clone()),
                                                 arguments: fn_args.into_iter()
                                                     .map(|x| Box::new(x))
                                                     .collect(),
@@ -302,10 +301,11 @@ impl Parse for RvalueNode {
 
                                         BracketedExpression::SquareBracketedExpression(index) =>
                                             PrimaryExpression::Indexing {
-                                                vector: Box::new(last_prim_expr_and_pos),
+                                                vector: Box::new(last_prim_expr_and_pos.clone()),
                                                 index: Box::new(index),
                                             }
                                     },
+                                    position: last_prim_expr_and_pos.position,
                                 }
                             ));
                             continue;
@@ -535,7 +535,7 @@ impl Parse for RvalueNode {
                                         let prefix_or_postfix = PrefixOrPostfix::Prefix;
                                         if let Some(
                                             op_node
-                                        ) = try_to_apply_unary_op_to_last_elem_of_vec((op, t.pos),
+                                        ) = try_to_apply_unary_op_to_last_elem_of_vec((op, t.pos.clone()),
                                                                                       &mut res_reversed,
                                                                                       prefix_or_postfix) {
                                             return Some(op_node);
@@ -546,7 +546,7 @@ impl Parse for RvalueNode {
                                         let prefix_or_postfix = PrefixOrPostfix::Postfix;
                                         if let Some(
                                             op_node
-                                        ) = try_to_apply_unary_op_to_last_elem_of_vec((op, t.pos),
+                                        ) = try_to_apply_unary_op_to_last_elem_of_vec((op, t.pos.clone()),
                                                                                       &mut input,
                                                                                       prefix_or_postfix) {
                                             return Some(op_node);

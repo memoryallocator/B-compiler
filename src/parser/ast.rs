@@ -1,8 +1,10 @@
-use std::cell::RefCell;
-use std::convert::TryFrom;
-use std::rc::Rc;
+use cell::RefCell;
+use collections::HashMap;
+use convert::TryFrom;
+use rc::{Rc, Weak};
+use std::*;
 
-use token::{Token, TokenType};
+use token::{ReservedName, Token, TokenType};
 
 use crate::lexical_analyzer::TokenPos;
 use crate::token;
@@ -27,9 +29,9 @@ pub(crate) trait ParseExact: Parse {
 }
 
 #[derive(Debug)]
-enum Ival {
+pub(crate) enum Ival {
     Constant(Constant),
-    Name(String),
+    Name(Rc<String>, TokenPos),
 }
 
 impl Parse for Ival {
@@ -38,9 +40,10 @@ impl Parse for Ival {
         return Some((
             if let Some(t) = tokens.first() {
                 match t.r#type {
-                    TokenType::Name => Ival::Name(t.val.as_ref().unwrap().clone()),
+                    TokenType::Name => Ival::Name(t.val.as_ref().unwrap().clone(), t.pos.clone()),
                     TokenType::Constant(constant_type) => Ival::Constant(
                         Constant {
+                            position: t.pos.clone(),
                             constant_type,
                             value: t.val.as_ref().unwrap().clone(),
                         }),
@@ -54,8 +57,46 @@ impl Parse for Ival {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Constant {
+    position: TokenPos,
     constant_type: token::Constant,
-    value: String,
+    value: Rc<String>,
+}
+
+// struct ValAndOverflowFlag<T> {
+//     value: T,
+//     overflow: bool,
+// }
+
+impl Constant {
+    // pub(crate) fn to_usize(&self) -> Option<ValAndOverflowFlag<usize>> {
+    //     match self.constant_type {
+    //         Constant::Octal => {}
+    //         Constant::Decimal => {}
+    //         Constant::Char => {}
+    //         Constant::String => {}
+    //     }
+    // }
+    //
+    // pub(crate) fn to_u64(&self) -> Option<ValAndOverflowFlag<u64>> {
+    //     match self.constant_type {
+    //         Constant::Octal => {}
+    //         Constant::Decimal => {}
+    //         Constant::Char => {}
+    //         Constant::String => {}
+    //     }
+    // }
+
+    pub(crate) fn get_position(&self) -> TokenPos {
+        self.position.clone()
+    }
+
+    pub(crate) fn get_type(&self) -> token::Constant {
+        self.constant_type
+    }
+
+    pub(crate) fn get_value(&self) -> Rc<String> {
+        self.value.clone()
+    }
 }
 
 impl TryFrom<&Token> for Constant {
@@ -64,6 +105,7 @@ impl TryFrom<&Token> for Constant {
     fn try_from(t: &Token) -> Result<Self, Self::Error> {
         return if let TokenType::Constant(const_type) = t.r#type {
             Ok(Constant {
+                position: t.pos.clone(),
                 constant_type: const_type,
                 value: t.val.as_ref().unwrap().clone(),
             })
@@ -84,8 +126,15 @@ impl ParseExact for Constant {}
 
 #[derive(Debug)]
 pub(crate) struct VariableDefinitionNode {
-    name: String,
-    initial_value: Option<Ival>,
+    position: TokenPos,
+    pub(crate) name: Rc<String>,
+    pub(crate) initial_value: Option<Ival>,
+}
+
+impl VariableDefinitionNode {
+    pub(crate) fn get_position(&self) -> TokenPos {
+        self.position.clone()
+    }
 }
 
 impl Parse for VariableDefinitionNode {
@@ -102,11 +151,12 @@ impl Parse for VariableDefinitionNode {
                     Token {
                         r#type: TokenType::Name,
                         val: name,
-                        ..
+                        pos: name_pos,
                     }) = toks_trim.get(0) {
                     let name = name.as_ref().unwrap().clone();
 
                     VariableDefinitionNode {
+                        position: name_pos.clone(),
                         name,
                         initial_value: match toks_trim.get(1) {
                             None => None,
@@ -126,9 +176,24 @@ impl Parse for VariableDefinitionNode {
 
 #[derive(Debug)]
 pub(crate) struct VectorDefinitionNode {
-    name: String,
-    specified_element_count: Option<Constant>,
+    position: TokenPos,
+    pub(crate) name: Rc<String>,
+    specified_size: Option<Constant>,
     initial_values: Option<Vec<Ival>>,
+}
+
+impl VectorDefinitionNode {
+    pub(crate) fn get_position(&self) -> TokenPos {
+        self.position.clone()
+    }
+
+    pub(crate) fn get_specified_size(&self) -> &Option<Constant> {
+        &self.specified_size
+    }
+
+    pub(crate) fn get_initial_values(&self) -> &Option<Vec<Ival>> {
+        &self.initial_values
+    }
 }
 
 impl Parse for VectorDefinitionNode {
@@ -136,9 +201,12 @@ impl Parse for VectorDefinitionNode {
         where Self: Sized {
         use token::LEFT_SQUARE_BRACKET;
 
-        let toks_trim: Vec<&Token> = tokens.into_iter()
-            .take_while(|t| t.r#type != TokenType::Semicolon)
-            .collect();
+        let toks_trim: Vec<&Token> =
+            tokens
+                .into_iter()
+                .take_while(|t| t.r#type != TokenType::Semicolon)
+                .collect();
+
         if toks_trim.len() == tokens.len() {  // no semicolon found
             return None;
         }
@@ -149,84 +217,85 @@ impl Parse for VectorDefinitionNode {
                 return None;
             }
         }
+
         let name_and_left_br_len = 2;
-        let node = match toks_trim[..name_and_left_br_len] {
-            [Token {
-                r#type: TokenType::Name,
-                val: name, ..
-            }, Token {
-                r#type: LEFT_SQUARE_BRACKET,
-                val: pair_pos, ..
-            }] => {
-                let name = name.as_ref().unwrap().clone();
-                let left_br_idx = name_and_left_br_len - 1;
+        let node =
+            match toks_trim[..name_and_left_br_len] {
+                [Token {
+                    r#type: TokenType::Name,
+                    val: name,
+                    pos: name_pos
+                }, Token { r#type: LEFT_SQUARE_BRACKET, .. }] => {
+                    let name = name.as_ref().unwrap().clone();
+                    let left_br_idx = name_and_left_br_len - 1;
 
-                let right_bracket_pos = TokenPos::parse(pair_pos.as_ref()?)?;
-                let right_bracket_idx = tokens.into_iter()
-                    .position(|t| t.pos == right_bracket_pos)?;
+                    let right_bracket_idx = get_right_bracket_index(tokens, left_br_idx)?;
 
-                if right_bracket_idx - left_br_idx > 2 {  // name [ ... ... ]
-                    return None;
-                }
+                    if right_bracket_idx - left_br_idx > 2 {  // name [ ... ... ]
+                        return None;
+                    }
 
-                let specified_element_count =
-                    if right_bracket_idx == left_br_idx + 1 {  // name [ ]
-                        None
-                    } else {
-                        if let Some(r#const) = Constant::parse_exact(
-                            &tokens[left_br_idx + 1..left_br_idx + 2]) {
-                            Some(r#const)
-                        } else {
+                    let specified_size =
+                        if right_bracket_idx == left_br_idx + 1 {  // name [ ]
                             None
-                        }
-                    };
+                        } else {
+                            if let Some(r#const) = Constant::parse_exact(
+                                &tokens[left_br_idx + 1..left_br_idx + 2]) {
+                                Some(r#const)
+                            } else {
+                                None
+                            }
+                        };
 
-                if toks_trim.get(right_bracket_idx + 1).is_none() {  // name [ const? ] ;
-                    VectorDefinitionNode {
-                        name,
-                        specified_element_count,
-                        initial_values: None,
-                    }
-                } else {
-                    let mut initial_values = Vec::<Ival>::new();
-                    let first_ival_pos: usize = right_bracket_idx + 1;
-                    while let Some((ival, _)) = Ival::parse(
-                        &tokens[first_ival_pos + 2 * initial_values.len()..]) {
-                        let comma_pos = first_ival_pos + 2 * initial_values.len() + 1;
-                        let next = toks_trim.get(comma_pos);
-                        match next {
-                            Some(Token {
-                                     r#type: TokenType::Comma,
-                                     ..
-                                 }) => {  // ival , ...
-                                initial_values.push(ival);
-                            }
-                            None => {  // ival $
-                                initial_values.push(ival);
-                                break;
-                            }
-                            _ => return None,
+                    if toks_trim.get(right_bracket_idx + 1).is_none() {  // name [ const? ] ;
+                        VectorDefinitionNode {
+                            position: name_pos.clone(),
+                            name,
+                            specified_size,
+                            initial_values: None,
                         }
-                    }
-                    VectorDefinitionNode {
-                        name,
-                        specified_element_count,
-                        initial_values: Some(initial_values),
+                    } else {
+                        let mut initial_values = Vec::<Ival>::new();
+                        let first_ival_pos: usize = right_bracket_idx + 1;
+                        while let Some((ival, _)) = Ival::parse(
+                            &tokens[first_ival_pos + 2 * initial_values.len()..]) {
+                            let comma_pos = first_ival_pos + 2 * initial_values.len() + 1;
+                            let next = toks_trim.get(comma_pos);
+                            match next {
+                                Some(Token {
+                                         r#type: TokenType::Comma,
+                                         ..
+                                     }) => {  // ival , ...
+                                    initial_values.push(ival);
+                                }
+                                None => {  // ival $
+                                    initial_values.push(ival);
+                                    break;
+                                }
+                                _ => return None,
+                            }
+                        }
+
+                        VectorDefinitionNode {
+                            position: name_pos.clone(),
+                            name,
+                            specified_size,
+                            initial_values: Some(initial_values),
+                        }
                     }
                 }
-            }
-            _ => return None
-        };
+                _ => return None
+            };
         Some((node, toks_trim.len() + 1))
     }
 }
 
-fn parse_name_list(tokens: &[Token]) -> Option<Vec<String>> {
+fn parse_name_list(tokens: &[Token]) -> Option<Vec<Rc<String>>> {
     if tokens.is_empty() {
         return Some(vec![]);
     }
 
-    let mut res = Vec::<String>::new();
+    let mut res = Vec::<Rc<String>>::new();
     loop {
         let name_idx = res.len() * 2;
         if let Some(Token {
@@ -254,9 +323,10 @@ fn parse_name_list(tokens: &[Token]) -> Option<Vec<String>> {
 
 #[derive(Debug)]
 pub(crate) struct FunctionDefinitionNode {
-    pub(crate) name: String,
-    pub(crate) parameter_names: Vec<String>,
-    pub(crate) local_variables: RefCell<Vec<String>>,
+    position: TokenPos,
+    pub(crate) name: Rc<String>,
+    pub(crate) parameter_names: Vec<Rc<String>>,
+    pub(crate) max_local_variables: Option<usize>,
     body: Box<StatementNode>,
 }
 
@@ -272,7 +342,8 @@ impl Parse for FunctionDefinitionNode {
         match &tokens[..2] {
             [Token {
                 r#type: TokenType::Name,
-                val: name, ..
+                val: name,
+                pos: name_pos
             }, Token {
                 r#type: LEFT_ROUND_BRACKET, ..
             }] => {
@@ -302,9 +373,10 @@ impl Parse for FunctionDefinitionNode {
                     toks_consumed += adv;
                     Some((
                         FunctionDefinitionNode {
+                            position: name_pos.clone(),
                             name,
                             parameter_names,
-                            local_variables: RefCell::default(),
+                            max_local_variables: None,
                             body: Box::new(stmt),
                         }, toks_consumed
                     ))
@@ -319,21 +391,21 @@ impl Parse for FunctionDefinitionNode {
 
 #[derive(Debug)]
 struct AutoDeclaration {
-    name: String,
+    name: Rc<String>,
     vector_size: Option<Constant>,
 }
 
 impl Parse for AutoDeclaration {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        use token::Bracket;
-
         if tokens.is_empty() {
             return None;
         }
 
-        const LEFT_SQUARE_BRACKET: Bracket = Bracket::left_square_bracket();
-        const RIGHT_SQUARE_BRACKET: Bracket = Bracket::right_square_bracket();
+        // const LEFT_SQUARE_BRACKET: Bracket = Bracket::left_square_bracket();
+        // const RIGHT_SQUARE_BRACKET: Bracket = Bracket::right_square_bracket();
+
+        use token::{LEFT_SQUARE_BRACKET, RIGHT_SQUARE_BRACKET};
 
         if tokens.len() >= 4 {
             if let [
@@ -341,15 +413,17 @@ impl Parse for AutoDeclaration {
                 r#type: TokenType::Name,
                 val: name, ..
             },
-            Token { r#type: TokenType::Bracket(LEFT_SQUARE_BRACKET), .. },
+            Token { r#type: LEFT_SQUARE_BRACKET, .. },
             Token {
                 r#type: TokenType::Constant(vec_size_type),
-                val: vec_size, ..
+                val: vec_size,
+                pos: const_pos,
             },
-            Token { r#type: TokenType::Bracket(RIGHT_SQUARE_BRACKET), .. }
+            Token { r#type: RIGHT_SQUARE_BRACKET, .. }
             ] = &tokens[..4] {
                 let name = name.as_ref().unwrap().clone();
                 let vector_size = Some(Constant {
+                    position: const_pos.clone(),
                     constant_type: *vec_size_type,
                     value: vec_size.as_ref().unwrap().clone(),
                 });
@@ -400,7 +474,10 @@ impl Parse for AutoDeclarationNode {
         use token::DeclarationSpecifier::Auto;
 
         return if let Some(
-            Token { r#type: TokenType::DeclarationSpecifier(Auto), pos, .. }
+            Token {
+                r#type: TokenType::ReservedName(ReservedName::DeclarationSpecifier(Auto)),
+                pos, ..
+            }
         ) = tokens.first() {
             let semicolon_pos =
                 if let Some(sp_minus_one) = get_semicolon_pos(&tokens[1..]) {
@@ -426,7 +503,7 @@ impl Parse for AutoDeclarationNode {
                 (stmt_node, adv)
             ) = StatementNode::parse(&tokens[next_statement_starts_at..]) {
                 Some((AutoDeclarationNode {
-                    position: *pos,
+                    position: pos.clone(),
                     declarations,
                     next_statement: Box::new(stmt_node),
                 }, next_statement_starts_at + adv))
@@ -471,7 +548,7 @@ impl AutoDeclarationNode {
 
 #[derive(Debug)]
 struct ExternDeclarationNode {
-    names: Vec<String>,
+    names: Vec<Rc<String>>,
     next_statement: Box<StatementNode>,
 }
 
@@ -484,8 +561,8 @@ impl Parse for ExternDeclarationNode {
 
         use token::DeclarationSpecifier::Extrn;
 
-        return if let Some(
-            Token { r#type: TokenType::DeclarationSpecifier(Extrn), .. }
+        if let Some(
+            Token { r#type: TokenType::ReservedName(ReservedName::DeclarationSpecifier(Extrn)), .. }
         ) = tokens.first() {
             let semicolon_pos =
                 if let Some(sp_minus_one) = get_semicolon_pos(&tokens[1..]) {
@@ -509,22 +586,20 @@ impl Parse for ExternDeclarationNode {
             if let Some(
                 (next_stmt, adv)
             ) = StatementNode::parse(&tokens[next_statement_starts_at..]) {
-                Some((ExternDeclarationNode {
+                return Some((ExternDeclarationNode {
                     names,
                     next_statement: Box::new(next_stmt),
-                }, next_statement_starts_at + adv))
-            } else {
-                None
+                }, next_statement_starts_at + adv));
             }
-        } else {
-            None
         };
+
+        None
     }
 }
 
 #[derive(Debug)]
 struct LabelDeclarationNode {
-    name: String,
+    label_name: Rc<String>,
     next_statement: Box<StatementNode>,
 }
 
@@ -542,7 +617,7 @@ impl Parse for LabelDeclarationNode {
             let name = name.as_ref().unwrap().clone();
             if let Some((next_stmt, adv)) = StatementNode::parse(&tokens[2..]) {
                 Some((LabelDeclarationNode {
-                    name,
+                    label_name: name,
                     next_statement: Box::new(next_stmt),
                 }, 2 + adv))
             } else {
@@ -579,7 +654,7 @@ fn extract_bracketed_rvalue(
 
 #[derive(Debug, Clone)]
 pub(crate) enum Lvalue {
-    Name(String),
+    Name(Rc<String>),
     DerefRvalue(Box<RvalueNode>),
     Indexing { vector: Box<RvalueNode>, index: Box<RvalueNode> },
 }
@@ -679,7 +754,7 @@ impl From<(TokenPos, Rvalue)> for RvalueNode {
 
 impl RvalueNode {
     pub(crate) fn get_position(&self) -> TokenPos {
-        self.position
+        self.position.clone()
     }
 
     pub(crate) fn to_truth_value(&self) -> Option<RvalueNode> {
@@ -707,7 +782,7 @@ impl RvalueNode {
                         let bin_op = *bin_op;
 
                         Some(RvalueNode::from(
-                            (self.position,
+                            (self.position.clone(),
                              Rvalue::Binary {
                                  lhs,
                                  bin_op,
@@ -719,7 +794,7 @@ impl RvalueNode {
                         let rhs = Box::new(rhs.to_truth_value()?);
 
                         Some(RvalueNode::from(
-                            (self.position,
+                            (self.position.clone(),
                              Rvalue::Binary {
                                  lhs,
                                  bin_op: RichBinaryOperation::LogicalAnd,
@@ -739,11 +814,11 @@ impl RvalueNode {
                 let condition = Box::new(condition.to_truth_value()?);
                 let on_true = on_true.clone();
                 let on_false = on_false.clone();
-                let colon_pos = *colon_pos;
+                let colon_pos = colon_pos.clone();
 
                 Some(
                     RvalueNode::from(
-                        (self.position,
+                        (self.position.clone(),
                          Rvalue::ConditionalExpression {
                              condition,
                              on_true,
@@ -756,7 +831,7 @@ impl RvalueNode {
             Rvalue::BracketedExpression(br_expr) =>
                 Some(
                     RvalueNode::from(
-                        (self.position,
+                        (self.position.clone(),
                          Rvalue::BracketedExpression(
                              Box::new(br_expr.to_truth_value()?)
                          ))
@@ -766,7 +841,7 @@ impl RvalueNode {
             Rvalue::Unary(Unary::LogicalNot, rvalue_node) => {
                 Some(
                     RvalueNode::from(
-                        (self.position,
+                        (self.position.clone(),
                          Rvalue::Unary(Unary::LogicalNot,
                                        Box::new(rvalue_node.to_truth_value()?)))
                     )
@@ -791,7 +866,7 @@ impl ParseExact for RvalueNode {}
 struct SwitchNode {
     rvalue: RvalueNode,
     body: Box<StatementNode>,
-    cases: RefCell<Vec<Constant>>,
+    cases: RefCell<HashMap<Constant, usize>>,
     default_case: bool,
 }
 
@@ -815,12 +890,10 @@ impl Parse for SwitchNode {
         let left_br_idx = 1;
         return match &tokens[..left_br_idx + 1] {
             [
-            Token { r#type: TokenType::ControlStatement(Switch), .. },
-            Token { r#type: LEFT_ROUND_BRACKET, val, .. }
+            Token { r#type: TokenType::ReservedName(ReservedName::ControlStatement(Switch)), .. },
+            Token { r#type: LEFT_ROUND_BRACKET, .. }
             ] => {
-                let right_br_pos = TokenPos::parse(val.as_ref()?)?;
-                let right_br_idx = tokens.into_iter()
-                    .position(|t| t.pos == right_br_pos)?;
+                let right_br_idx = get_right_bracket_index(tokens, left_br_idx)?;
 
                 if right_br_idx == left_br_idx + 1 {  // switch ( )
                     return None;
@@ -866,7 +939,7 @@ impl Parse for CaseNode {
             return None;
         }
 
-        if tokens.first()?.r#type != TokenType::ControlStatement(Case) {
+        if tokens[0].r#type != TokenType::ReservedName(ReservedName::ControlStatement(Case)) {
             return None;
         }
 
@@ -903,7 +976,7 @@ impl Parse for IfNode {
             return None;
         }
 
-        if tokens[0].r#type != TokenType::ControlStatement(If) {
+        if tokens[0].r#type != TokenType::ReservedName(ReservedName::ControlStatement(If)) {
             return None;
         }
 
@@ -924,7 +997,7 @@ impl Parse for IfNode {
 
         let else_body =
             if let Some(tok) = tokens.get(toks_consumed) {
-                if tok.r#type == TokenType::ControlStatement(Else) {
+                if tok.r#type == TokenType::ReservedName(ReservedName::ControlStatement(Else)) {
                     toks_consumed += 1;
                     if toks_consumed == tokens.len() {
                         return None;
@@ -966,7 +1039,7 @@ impl Parse for WhileNode {
         use token::ControlStatementIdentifier::While;
         use token::BracketType::Round;
 
-        if tokens[0].r#type != TokenType::ControlStatement(While) {
+        if tokens[0].r#type != TokenType::ReservedName(ReservedName::ControlStatement(While)) {
             return None;
         }
 
@@ -995,18 +1068,46 @@ impl Parse for WhileNode {
     }
 }
 
+fn get_right_bracket_index(tokens: &[Token], left_br_idx: usize) -> Option<usize> {
+    use token::{LeftOrRight, Bracket};
+
+    if let Some(
+        Token {
+            val: pair_pos,
+            r#type: TokenType::Bracket(
+                Bracket { left_or_right: LeftOrRight::Left, .. }
+            ), ..
+        }) = tokens.get(left_br_idx) {
+        let right_bracket_pos = pair_pos.as_ref().unwrap();
+        let right_bracket_pos = TokenPos::try_from(right_bracket_pos.clone());
+        let right_bracket_pos =
+            match right_bracket_pos {
+                Ok(tok_pos) => {
+                    tok_pos
+                }
+                Err(_) => {
+                    return None;
+                }
+            };
+
+        tokens
+            .into_iter()
+            .position(|t| t.pos == right_bracket_pos)
+    } else {
+        unreachable!()
+    }
+}
+
 pub(crate) fn extract_bracketed_expression(tokens: &[Token]) -> Option<&[Token]> {
     const LEFT: token::LeftOrRight = token::LeftOrRight::Left;
 
     use token::Bracket;
 
     return if let Token {
-        r#type: TokenType::Bracket(Bracket { left_or_right: LEFT, .. }),
-        val, ..
+        r#type: TokenType::Bracket(Bracket { left_or_right: LEFT, .. }), ..
     } = tokens.get(0)? {
-        let right_br_pos = TokenPos::parse(val.as_ref()?)?;
-        let right_br_idx = tokens.into_iter()
-            .position(|t| t.pos == right_br_pos)?;
+        let right_br_idx = get_right_bracket_index(tokens, 0)?;
+
         Some(&tokens[1..right_br_idx])
     } else {
         None
@@ -1066,7 +1167,7 @@ impl Parse for GotoNode {
 
         use token::ControlStatementIdentifier::Goto;
 
-        if tokens[0].r#type != TokenType::ControlStatement(Goto) {
+        if tokens[0].r#type != TokenType::ReservedName(ReservedName::ControlStatement(Goto)) {
             return None;
         }
 
@@ -1096,7 +1197,7 @@ impl Parse for ReturnNode {
         use token::BracketType::Round;
         use token::ControlStatementIdentifier::Return;
 
-        if tokens[0].r#type != TokenType::ControlStatement(Return) {
+        if tokens[0].r#type != TokenType::ReservedName(ReservedName::ControlStatement(Return)) {
             return None;
         }
 
@@ -1139,6 +1240,44 @@ impl Parse for RvalueAndSemicolonNode {
 }
 
 #[derive(Debug)]
+enum WhileOrSwitchStatementPtr {
+    While(Weak<WhileNode>),
+    Switch(Weak<SwitchNode>),
+}
+
+#[derive(Debug)]
+struct BreakNode {
+    position: TokenPos,
+    break_from: RefCell<Option<WhileOrSwitchStatementPtr>>,
+}
+
+impl Parse for BreakNode {
+    fn parse(input: &[Token]) -> Option<(Self, usize)>
+        where Self: Sized {
+        if input.len() < 2 {
+            return None;
+        }
+
+        use token::ControlStatementIdentifier::Break;
+
+        match &input[..2] {
+            [Token {
+                r#type: TokenType::ReservedName(ReservedName::ControlStatement(Break)),
+                pos, ..
+            },
+            Token { r#type: TokenType::Semicolon, .. }] =>
+                Some((BreakNode {
+                    position: pos.clone(),
+                    break_from: RefCell::new(None),
+                }, 2)),
+            _ => None
+        }
+    }
+}
+
+impl ParseExact for BreakNode {}
+
+#[derive(Debug)]
 enum Statement {
     NullStatement,
     Compound(CompoundStatementNode),
@@ -1146,12 +1285,13 @@ enum Statement {
     ExternDeclaration(ExternDeclarationNode),
     LabelDeclaration(LabelDeclarationNode),
     Return(ReturnNode),
-    Switch(SwitchNode),
+    Switch(Rc<SwitchNode>),
     Case(CaseNode),
     If(IfNode),
-    While(WhileNode),
+    While(Rc<WhileNode>),
     Goto(GotoNode),
     RvalueAndSemicolon(RvalueAndSemicolonNode),
+    Break(BreakNode),
 }
 
 impl Parse for Statement {
@@ -1179,8 +1319,12 @@ impl Parse for Statement {
             return Some((Statement::If(r#if), adv));
         }
 
+        if let Some((r#break, adv)) = BreakNode::parse(tokens) {
+            return Some((Statement::Break(r#break), adv));
+        }
+
         if let Some((r#while, adv)) = WhileNode::parse(tokens) {
-            return Some((Statement::While(r#while), adv));
+            return Some((Statement::While(Rc::new(r#while)), adv));
         }
 
         if let Some(
@@ -1190,7 +1334,7 @@ impl Parse for Statement {
         }
 
         if let Some((switch, adv)) = SwitchNode::parse(tokens) {
-            return Some((Statement::Switch(switch), adv));
+            return Some((Statement::Switch(Rc::new(switch)), adv));
         }
 
         if let Some((case, adv)) = CaseNode::parse(tokens) {
@@ -1238,7 +1382,7 @@ impl Parse for StatementNode {
 
         return if let Some((statement, adv)) = Statement::parse(tokens) {
             Some((StatementNode {
-                position: tokens[0].pos,
+                position: tokens[0].pos.clone(),
                 statement: Box::new(statement),
             }, adv))
         } else {
@@ -1250,79 +1394,86 @@ impl Parse for StatementNode {
 #[derive(Debug)]
 pub(crate) enum DefinitionNode {
     Variable(VariableDefinitionNode),
-    Vector(VectorDefinitionNode),
+    Vector(Rc<VectorDefinitionNode>),
     Function(Rc<FunctionDefinitionNode>),
 }
 
-// impl SetParent for DefinitionNode {
-//     fn set_parent(&mut self, parent: Weak<AbstractSyntaxNode>) -> Result<(), String> {
-//         match self.definition {
-//             Definition::Function(fn_def) => fn_def.set_parent(parent),
-//             _ => Ok(())
-//         }
-//     }
-// }
+impl DefinitionNode {
+    pub(crate) fn get_position(&self) -> TokenPos {
+        match self {
+            DefinitionNode::Variable(var_def) => var_def.position.clone(),
+            DefinitionNode::Vector(vec_def) => vec_def.position.clone(),
+            DefinitionNode::Function(fn_def) => fn_def.position.clone(),
+        }
+    }
+
+    pub(crate) fn get_name(&self) -> Rc<String> {
+        match self {
+            DefinitionNode::Variable(var_def) =>
+                var_def.name.clone(),
+            DefinitionNode::Vector(vec_def) =>
+                vec_def.name.clone(),
+            DefinitionNode::Function(fn_def) =>
+                fn_def.name.clone(),
+        }
+    }
+}
 
 impl Parse for DefinitionNode {
-    fn parse(tokens: &[Token]) -> Option<(Self, usize)>
+    fn parse(input: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        if let Some((var_def_node, adv)) = VariableDefinitionNode::parse(tokens) {
+        if let Some(
+            (var_def_node, adv)
+        ) = VariableDefinitionNode::parse(input) {
             return Some((DefinitionNode::Variable(var_def_node), adv));
         }
 
-        if let Some((vec_def_node, adv)) = VectorDefinitionNode::parse(tokens) {
-            return Some((DefinitionNode::Vector(vec_def_node), adv));
+        if let Some(
+            (vec_def_node, adv)
+        ) = VectorDefinitionNode::parse(input) {
+            return Some((DefinitionNode::Vector(Rc::new(vec_def_node)), adv));
         }
 
-        if let Some((fn_def_node, adv)) = FunctionDefinitionNode::parse(tokens) {
+        if let Some(
+            (fn_def_node, adv)
+        ) = FunctionDefinitionNode::parse(input) {
             return Some((DefinitionNode::Function(Rc::new(fn_def_node)), adv));
         }
+
         None
     }
 }
 
-// #[derive(Debug)]
-// enum AbstractSyntaxNode {
-//     Definition(DefinitionNode)
-// }
-
-// #[derive(Debug)]
-// struct AbstractSyntaxTree {
-//     root: ProgramNode
-// }
-
 #[derive(Debug)]
 pub(crate) struct ProgramNode {
-    definitions: Vec<DefinitionNode>,
+    definitions: Vec<Rc<DefinitionNode>>,
 }
 
 impl ProgramNode {
-    pub fn new() -> Self {
-        ProgramNode::default()
+    pub(crate) fn get_definitions(&self) -> &Vec<Rc<DefinitionNode>> {
+        &self.definitions
     }
 }
 
-impl From<Vec<DefinitionNode>> for ProgramNode {
-    fn from(definitions: Vec<DefinitionNode>) -> Self {
+impl From<Vec<Rc<DefinitionNode>>> for ProgramNode {
+    fn from(definitions: Vec<Rc<DefinitionNode>>) -> Self {
         ProgramNode { definitions }
-    }
-}
-
-impl Default for ProgramNode {
-    fn default() -> Self {
-        ProgramNode { definitions: Vec::default() }
     }
 }
 
 impl Parse for ProgramNode {
     fn parse(tokens: &[Token]) -> Option<(Self, usize)>
         where Self: Sized {
-        let mut defs = Vec::<DefinitionNode>::new();
+        let mut defs = Vec::<Rc<DefinitionNode>>::new();
         let mut offset: usize = 0;
-        while let Some((def_node, adv)) = DefinitionNode::parse(&tokens[offset..]) {
+
+        while let Some(
+            (def_node, adv)
+        ) = DefinitionNode::parse(&tokens[offset..]) {
             offset += adv;
-            defs.push(def_node);
+            defs.push(Rc::new(def_node));
         }
+
         if offset != tokens.len() {
             None
         } else {
