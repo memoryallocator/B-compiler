@@ -1,20 +1,12 @@
-use borrow::Borrow;
-use process;
 use std::*;
+use process;
 
 use crate::config::*;
 
-mod token;
 mod lexical_analyzer;
 mod parser;
 mod config;
-
-fn generate_error_message_with_pos<T: Borrow<str>, U: Borrow<lexical_analyzer::TokenPos>>(
-    error_str: T,
-    pos: U,
-) -> String {
-    format!("Error at {}: {}", pos.borrow(), error_str.borrow())
-}
+mod code_generator;
 
 fn process_command_line_arguments()
     -> Result<(String, CompilerOptions), String> {
@@ -24,7 +16,7 @@ fn process_command_line_arguments()
         return Err("not enough arguments".to_string());
     }
 
-    let mut comp_opts = CompilerOptions::default();
+    let mut target_platform = Option::<TargetPlatform>::None;
     let target_pattern = "--target=";
 
     let mut i: usize = 2;
@@ -34,7 +26,7 @@ fn process_command_line_arguments()
             let target = &args[i][target_pattern.len()..];
             match target {
                 "native" => {
-                    comp_opts = CompilerOptions::default();
+                    target_platform = Some(TargetPlatform::native());
                 }
                 _ => {
                     return Err(format!("unknown target: {}", target));
@@ -46,7 +38,9 @@ fn process_command_line_arguments()
         i += 1;
     }
 
-    Ok((args[1].clone(), comp_opts))
+    let target_platform = target_platform.unwrap_or(TargetPlatform::native());
+
+    Ok((args[1].clone(), CompilerOptions { target_platform }))
 }
 
 fn main() {
@@ -65,30 +59,54 @@ fn main() {
 
     let mut lexical_analyzer = lexical_analyzer::LexicalAnalyzer {
         compiler_options: &compiler_options,
-        second_symbol_of_escape_sequence_to_character_mapping: &get_second_symbol_of_escape_sequence_to_character_mapping(),
+        escape_sequences: &get_escape_sequences(),
         reserved_symbols: &get_reserved_symbols(),
     };
-    let tokens = lexical_analyzer.run(&source_code).unwrap_or_else(
+
+    let tokens = lexical_analyzer.run(&source_code);
+    mem::drop(lexical_analyzer);
+
+    let tokens = tokens.unwrap_or_else(
         |err| {
             eprintln!("Lexical analyzer returned an error: {}", err);
             process::exit(1);
         });
 
+    let standard_library_names = &get_standard_library_names();
+
     let mut parser = parser::Parser {
         compiler_options,
         source_code: Some(&source_code),
-        standard_library_names: &get_standard_library_names(),
+        standard_library_names,
     };
 
-    let (warnings, ast_and_scope_table) = parser.run(&tokens);
-    for warning in warnings {
-        println!("{}", warning);
-    }
-    let (ast, scope_table) = ast_and_scope_table.unwrap_or_else(
+    let ast = parser.run(&tokens);
+    mem::drop(parser);
+
+    let ast = ast.unwrap_or_else(
         |err| {
             eprintln!("Parser returned an error: {}", err);
             process::exit(1);
         });
 
-    // dbg!(ast);
+    let code_generator = code_generator::CodeGenerator {
+        compiler_options,
+        standard_library_names,
+        source_code: Some(&*source_code),
+    };
+
+    let res = code_generator.run(&ast);
+    mem::drop(code_generator);
+
+    for warning in res.0 {
+        eprintln!("{}", warning);
+    }
+
+    let res = res.1.unwrap_or_else(
+        |err| {
+            eprintln!("Code generator returned an error: {}", err);
+            process::exit(1);
+        });
+
+    println!("{}", &res);
 }

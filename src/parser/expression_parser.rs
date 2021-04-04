@@ -1,14 +1,15 @@
+use std::*;
 use collections::VecDeque;
 use convert::TryFrom;
 use rc::Rc;
-use std::*;
+use cell::Cell;
 
-use token::{Token, TokenType};
+use crate::lexical_analyzer::token;
+use token::*;
 
-use crate::lexical_analyzer::TokenPos;
-use crate::token;
-
-use super::ast::*;
+use super::ast;
+use ast::*;
+use ast::ConstantNode;
 
 #[derive(Debug)]
 enum BracketedExpression {
@@ -44,7 +45,7 @@ impl Parse for BracketedExpression {
             for (i, t) in input.into_iter().enumerate() {
                 // let t = &input[i];
 
-                if let TokenType::Comma = t.r#type {
+                if let WrappedToken::Comma = t.token {
                     let arg = RvalueNode::parse_exact(&input[arg_starts_from..i])?;
                     arguments.push(arg);
                     arg_starts_from = i + 1;
@@ -62,7 +63,7 @@ impl Parse for BracketedExpression {
             };
         }
 
-        return if let TokenType::Bracket(br) = input[0].r#type {
+        return if let WrappedToken::Bracket(br) = input[0].token {
             let expr = extract_bracketed_expression(input)?;
             let adv = 1 + expr.len() + 1;
 
@@ -93,10 +94,10 @@ enum TokenOrRvalueNode {
 #[derive(Debug, Clone)]
 enum PrimaryExpression {
     Name(Rc<String>),
-    Constant(Constant),
-    BracketedRvalue(Box<RvalueNode>),
-    Indexing { vector: Box<PrimaryExpressionAndPos>, index: Box<RvalueNode> },
-    FnCall { fn_name: Box<PrimaryExpressionAndPos>, arguments: Vec<Box<RvalueNode>> },
+    Constant(token::Constant),
+    BracketedRvalue(Rc<RvalueNode>),
+    Indexing { vector: Box<PrimaryExpressionAndPos>, index: Rc<RvalueNode> },
+    FnCall { fn_name: Box<PrimaryExpressionAndPos>, arguments: Vec<Rc<RvalueNode>> },
 }
 
 #[derive(Debug, Clone)]
@@ -108,29 +109,53 @@ struct PrimaryExpressionAndPos {
 impl From<PrimaryExpressionAndPos> for RvalueNode {
     fn from(x: PrimaryExpressionAndPos) -> Self {
         let position = x.position;
+
         match x.prim_expr {
             PrimaryExpression::BracketedRvalue(br_rvalue) =>
-                RvalueNode::from((position, Rvalue::BracketedExpression(br_rvalue))),
+                RvalueNode { position, rvalue: Rc::new(Rvalue::BracketedExpression(br_rvalue)) },
 
             PrimaryExpression::Constant(constant) =>
-                RvalueNode::from((position, Rvalue::Constant(constant))),
+                RvalueNode {
+                    position,
+                    rvalue: Rc::new(Rvalue::Constant(
+                        Rc::new(ConstantNode {
+                            constant: Rc::new(constant),
+                            position,
+                        }))),
+                },
 
             PrimaryExpression::FnCall { fn_name, arguments } =>
-                RvalueNode::from((position, Rvalue::FunctionCall {
-                    fn_name: Box::new(RvalueNode::from(*fn_name)),
-                    arguments,
-                })),
+                RvalueNode {
+                    position,
+                    rvalue: Rc::new(Rvalue::FunctionCall(FunctionCallNode {
+                        fn_name: Rc::new(RvalueNode::from(*fn_name)),
+                        arguments,
+                    })),
+                },
 
-            PrimaryExpression::Name(name) => {
-                RvalueNode::from((position, Rvalue::Lvalue(Lvalue::Name(name))))
-            }
+            PrimaryExpression::Name(name) =>
+                RvalueNode {
+                    position,
+                    rvalue: Rc::new(Rvalue::Lvalue(
+                        Rc::new(LvalueNode {
+                            position,
+                            lvalue: Rc::new(Lvalue::Name(name)),
+                        }))),
+                },
 
-            PrimaryExpression::Indexing { vector, index } => {
-                RvalueNode::from((position, Rvalue::Lvalue(Lvalue::Indexing {
-                    vector: Box::new(RvalueNode::from(*vector)),
-                    index,
-                })))
-            }
+            PrimaryExpression::Indexing { vector, index } =>
+                RvalueNode {
+                    position,
+                    rvalue: Rc::new(Rvalue::Lvalue(
+                        Rc::new(LvalueNode {
+                            position,
+                            lvalue: Rc::new(Lvalue::Indexing {
+                                vector: Rc::new(RvalueNode::from(*vector)),
+                                index,
+                            }),
+                        })
+                    )),
+                },
         }
     }
 }
@@ -141,8 +166,6 @@ impl Parse for RvalueNode {
         if input.is_empty() {
             return None;
         }
-
-        use token::Operator;
 
         fn parse_primary_expressions(input: &[Token]) -> Option<Vec<TokenOrRvalueNode>> {
             enum TokenOrPrimaryExpression {
@@ -166,12 +189,7 @@ impl Parse for RvalueNode {
                 }
             }
 
-            struct LvalueAndPos {
-                lvalue: Lvalue,
-                pos: TokenPos,
-            }
-
-            impl TryFrom<TokenOrPrimaryExpression> for LvalueAndPos {
+            impl TryFrom<TokenOrPrimaryExpression> for LvalueNode {
                 type Error = ();
 
                 fn try_from(x: TokenOrPrimaryExpression) -> Result<Self, Self::Error> {
@@ -180,17 +198,17 @@ impl Parse for RvalueNode {
                     ) = x {
                         Ok(match prim_expr {
                             PrimaryExpression::Name(name) =>
-                                LvalueAndPos {
-                                    lvalue: Lvalue::Name(name),
-                                    pos: position,
+                                LvalueNode {
+                                    lvalue: Rc::new(Lvalue::Name(name)),
+                                    position,
                                 },
                             PrimaryExpression::Indexing { vector, index } =>
-                                LvalueAndPos {
-                                    lvalue: Lvalue::Indexing {
-                                        vector: Box::new(RvalueNode::try_from(*vector).unwrap()),
+                                LvalueNode {
+                                    lvalue: Rc::new(Lvalue::Indexing {
+                                        vector: Rc::new(RvalueNode::try_from(*vector).unwrap()),
                                         index,
-                                    },
-                                    pos: position,
+                                    }),
+                                    position,
                                 },
                             _ => return Err(())
                         })
@@ -207,10 +225,13 @@ impl Parse for RvalueNode {
                     x: TokenOrPrimaryExpression
                 ) -> Result<Self, Self::Error> {
                     if x.is_lvalue() {
-                        let lvalue_and_pos = LvalueAndPos::try_from(x).unwrap();
+                        let lvalue_node = LvalueNode::try_from(x).unwrap();
+
                         return Ok(TokenOrRvalueNode::RvalueNode(
-                            RvalueNode::from((lvalue_and_pos.pos,
-                                              Rvalue::Lvalue(lvalue_and_pos.lvalue)))
+                            RvalueNode {
+                                position: lvalue_node.position,
+                                rvalue: Rc::new(Rvalue::Lvalue(Rc::new(lvalue_node))),
+                            }
                         ));
                     }
 
@@ -221,7 +242,9 @@ impl Parse for RvalueNode {
                         TokenOrPrimaryExpression::PrimaryExpression(
                             prim_expr_and_pos
                         ) => {
-                            if let Some(rvalue_node) = RvalueNode::try_from(prim_expr_and_pos).ok() {
+                            if let Some(
+                                rvalue_node
+                            ) = RvalueNode::try_from(prim_expr_and_pos).ok() {
                                 Ok(TokenOrRvalueNode::RvalueNode(rvalue_node))
                             } else {
                                 return Err(());
@@ -238,27 +261,26 @@ impl Parse for RvalueNode {
             while let Some(t) = input.get(i) {
                 let pos = t.pos.clone();
 
-                match t.r#type {
-                    TokenType::Name => {
+                match &t.token {
+                    WrappedToken::Name(name) => {
                         toks_or_prim_or_br_exprs.push(
                             TokenOrPrimaryExpression::PrimaryExpression(
                                 PrimaryExpressionAndPos {
-                                    prim_expr: PrimaryExpression::Name(t.val.as_ref().unwrap().clone()),
+                                    prim_expr: PrimaryExpression::Name(name.clone()),
                                     position: pos,
                                 }))
                     }
 
-                    TokenType::Constant(_) => {
+                    WrappedToken::Constant(constant) => {
                         toks_or_prim_or_br_exprs.push(
                             TokenOrPrimaryExpression::PrimaryExpression(
                                 PrimaryExpressionAndPos {
-                                    prim_expr: PrimaryExpression::Constant(
-                                        Constant::try_from(&input[i]).ok()?),
+                                    prim_expr: PrimaryExpression::Constant(constant.clone()),
                                     position: pos,
                                 }))
                     }
 
-                    TokenType::Bracket(br) => {
+                    WrappedToken::Bracket(br) => {
                         if br.bracket_type == token::BracketType::Curly {
                             return None;
                         }
@@ -288,21 +310,21 @@ impl Parse for RvalueNode {
                                         BracketedExpression::RoundBracketedExpression(single_arg) =>
                                             PrimaryExpression::FnCall {
                                                 fn_name: Box::new(last_prim_expr_and_pos.clone()),
-                                                arguments: vec![Box::new(single_arg)],
+                                                arguments: vec![Rc::new(single_arg)],
                                             },
 
                                         BracketedExpression::FunctionArgumentList(fn_args) =>
                                             PrimaryExpression::FnCall {
                                                 fn_name: Box::new(last_prim_expr_and_pos.clone()),
                                                 arguments: fn_args.into_iter()
-                                                    .map(|x| Box::new(x))
+                                                    .map(|x| Rc::new(x))
                                                     .collect(),
                                             },
 
                                         BracketedExpression::SquareBracketedExpression(index) =>
                                             PrimaryExpression::Indexing {
                                                 vector: Box::new(last_prim_expr_and_pos.clone()),
-                                                index: Box::new(index),
+                                                index: Rc::new(index),
                                             }
                                     },
                                     position: last_prim_expr_and_pos.position,
@@ -315,9 +337,9 @@ impl Parse for RvalueNode {
                             toks_or_prim_or_br_exprs.push(
                                 TokenOrPrimaryExpression::PrimaryExpression(
                                     PrimaryExpressionAndPos {
-                                        position: br_rvalue.get_position(),
+                                        position: br_rvalue.position,
                                         prim_expr: PrimaryExpression::BracketedRvalue(
-                                            Box::new(br_rvalue)),
+                                            Rc::new(br_rvalue)),
                                     }
                                 )
                             );
@@ -327,7 +349,7 @@ impl Parse for RvalueNode {
 
                         continue;
                     }
-                    TokenType::Colon | TokenType::QuestionMark | TokenType::Operator(_) =>
+                    WrappedToken::Colon | WrappedToken::QuestionMark | WrappedToken::Operator(_) =>
                         toks_or_prim_or_br_exprs.push(
                             TokenOrPrimaryExpression::Token(t.clone())),
                     _ => return None,
@@ -368,14 +390,14 @@ impl Parse for RvalueNode {
 
             fn op_may_be_postfix(op: Operator) -> bool {
                 match op {
-                    Operator::Inc | Operator::Dec => true,
+                    Operator::IncDec(_) => true,
                     _ => false
                 }
             }
 
             fn op_may_be_prefix(op: Operator) -> bool {
                 match op {
-                    Operator::Inc | Operator::Dec
+                    Operator::IncDec(_)
                     | Operator::Plus | Operator::Minus
                     | Operator::Asterisk | Operator::Ampersand | Operator::Unary(_) => true,
 
@@ -403,8 +425,8 @@ impl Parse for RvalueNode {
                     Operator::Plus | Operator::Minus
                     | Operator::Asterisk | Operator::Unary(_) => true,
 
-                    Operator::Ampersand | Operator::Inc | Operator::Dec => {
-                        if let RvalueNode { rvalue: Rvalue::Lvalue(_), .. } = rvalue_node {
+                    Operator::Ampersand | Operator::IncDec(_) => {
+                        if let Rvalue::Lvalue(_) = rvalue_node.rvalue.as_ref() {
                             true
                         } else {
                             false
@@ -423,53 +445,48 @@ impl Parse for RvalueNode {
                 let (op, position) = op_and_pos;
                 assert!(unary_op_can_be_applied(op, &rvalue_node, prefix_or_postfix));
 
-                use token::UnaryOperation;
+                let rvalue_node = Rc::new(rvalue_node);
 
-                match op {
-                    Operator::Plus =>
-                        RvalueNode::from((position, Rvalue::Unary(Unary::Plus,
-                                                                  Box::new(rvalue_node)))),
-                    Operator::Minus =>
-                        RvalueNode::from((position, Rvalue::Unary(Unary::Minus,
-                                                                  Box::new(rvalue_node)))),
-                    Operator::Asterisk =>
-                        RvalueNode::from((position, Rvalue::Lvalue(
-                            Lvalue::DerefRvalue(Box::new(rvalue_node))
-                        ))),
-                    Operator::Ampersand =>
-                        RvalueNode::from((position, Rvalue::TakeAddress(
-                            Lvalue::try_from(rvalue_node).unwrap()
-                        ))),
-                    Operator::Unary(unary_op) =>
-                        match unary_op {
-                            UnaryOperation::LogicalNot =>
-                                RvalueNode::from((position,
-                                                  Rvalue::Unary(Unary::LogicalNot,
-                                                                Box::new(rvalue_node)))),
-                            UnaryOperation::Complement =>
-                                RvalueNode::from((position,
-                                                  Rvalue::Unary(Unary::Complement,
-                                                                Box::new(rvalue_node)))),
-                        },
-                    Operator::Inc =>
-                        RvalueNode::from((position,
-                                          Rvalue::IncDec(
-                                              IncDecNode::from(
-                                                  (IncDec::Increment,
-                                                   prefix_or_postfix,
-                                                   Lvalue::try_from(rvalue_node).unwrap())
-                                              ))
-                        )),
-                    Operator::Dec =>
-                        RvalueNode::from((position,
-                                          Rvalue::IncDec(
-                                              IncDecNode::from(
-                                                  (IncDec::Decrement,
-                                                   prefix_or_postfix,
-                                                   Lvalue::try_from(rvalue_node).unwrap())
-                                              ))
-                        )),
-                    _ => unreachable!()
+                let rvalue =
+                    match op {
+                        Operator::Plus => Rvalue::Unary(Unary::Plus, rvalue_node),
+
+                        Operator::Minus => Rvalue::Unary(Unary::Minus, rvalue_node),
+
+                        Operator::Asterisk => Rvalue::Lvalue(Rc::new(
+                            LvalueNode {
+                                position,
+                                lvalue: Rc::new(Lvalue::DerefRvalue(rvalue_node)),
+                            })),
+
+                        Operator::Ampersand => Rvalue::TakeAddress(
+                            Rc::<LvalueNode>::try_from(&*rvalue_node).unwrap()
+                        ),
+
+                        Operator::Unary(unary_op) =>
+                            match unary_op {
+                                UnaryOperation::LogicalNot => Rvalue::Unary(Unary::LogicalNot,
+                                                                            rvalue_node),
+
+                                UnaryOperation::Complement => Rvalue::Unary(Unary::Complement,
+                                                                            rvalue_node),
+                            },
+
+                        Operator::IncDec(inc_or_dec) =>
+                            Rvalue::IncDec(Rc::new(
+                                IncDecNode {
+                                    inc_or_dec,
+                                    inc_dec_type: prefix_or_postfix,
+                                    lvalue: Rc::<LvalueNode>::try_from(&*rvalue_node).unwrap(),
+                                }
+                            )),
+
+                        _ => unreachable!()
+                    };
+
+                RvalueNode {
+                    position,
+                    rvalue: Rc::new(rvalue),
                 }
             }
 
@@ -504,8 +521,8 @@ impl Parse for RvalueNode {
             while let Some(tok_or_rvalue) = input.pop() {
                 match &tok_or_rvalue {
                     TokenOrRvalueNode::Token(t) => {
-                        match t.r#type {
-                            TokenType::Operator(op) => {
+                        match t.token {
+                            WrappedToken::Operator(op) => {
                                 if op_is_not_unary(op) {
                                     res_reversed.push(tok_or_rvalue);
                                     continue;
@@ -558,7 +575,8 @@ impl Parse for RvalueNode {
 
                                 res_reversed.push(TokenOrRvalueNode::RvalueNode(op_node?));
                             }
-                            TokenType::Colon | TokenType::QuestionMark => res_reversed.push(tok_or_rvalue),
+                            WrappedToken::Colon | WrappedToken::QuestionMark =>
+                                res_reversed.push(tok_or_rvalue),
                             _ => unreachable!()
                         }
                     }
@@ -577,10 +595,10 @@ impl Parse for RvalueNode {
             use std::collections::HashMap;
 
             use Operator::*;
-            use token::BinaryRelation::*;
-            use token::BinaryOperation::*;
-            use token::RichBinaryOperation::*;
-            use token::LeftOrRight::*;
+            use BinaryRelation::*;
+            use BinaryOperation::*;
+            use RichBinaryOperation::*;
+            use LeftOrRight::*;
 
             let bin_op_priority = HashMap::<Operator, i32>::from((|| {
                 fn map_priority(ops: Vec<Operator>, priority: i32) -> Vec<(Operator, i32)> {
@@ -656,7 +674,7 @@ impl Parse for RvalueNode {
             })().into_iter().collect());
 
             fn token_to_binary_operator(x: &Token) -> Option<Operator> {
-                if let Token { r#type: TokenType::Operator(op), .. } = x {
+                if let Token { token: WrappedToken::Operator(op), .. } = x {
                     Some(
                         match op {
                             Plus | Minus | Asterisk | Ampersand | Binary(_) => *op,
@@ -686,34 +704,34 @@ impl Parse for RvalueNode {
 
                 let rhs =
                     if let Some(rvalue_node) = operands.pop() {
-                        Box::new(rvalue_node)
+                        Rc::new(rvalue_node)
                     } else {
                         return Err(());
                     };
 
                 let lhs =
                     if let Some(rvalue_node) = operands.pop() {
-                        Box::new(rvalue_node)
+                        Rc::new(rvalue_node)
                     } else {
                         return Err(());
                     };
 
-                Ok(RvalueNode::from(
-                    (pos,
-                     Rvalue::Binary {
-                         lhs,
-                         bin_op: match op {
-                             Plus => Add,
-                             Minus => Sub,
-                             Asterisk => Mul,
-                             Ampersand => BitwiseAnd,
-                             Binary(bin_op) =>
-                                 RegularBinary(bin_op),
-                             _ => unreachable!()
-                         },
-                         rhs,
-                     })
-                ))
+                Ok(RvalueNode {
+                    position: pos,
+                    rvalue: Rc::new(Rvalue::Binary {
+                        lhs,
+                        bin_op: match op {
+                            Plus => Add,
+                            Minus => Sub,
+                            Asterisk => Mul,
+                            Ampersand => BitwiseAnd,
+                            Binary(bin_op) =>
+                                RegularBinary(bin_op),
+                            _ => unreachable!()
+                        },
+                        rhs,
+                    }),
+                })
             }
 
             enum RvalueNodeOrUnit {
@@ -816,15 +834,13 @@ impl Parse for RvalueNode {
                 return None;
             }
 
-            use token::Assign;
-
             enum AssignOrRvalueNode {
                 Assign(Assign, TokenPos),
                 RvalueNode(RvalueNode),
             }
 
             fn parse_assignments(
-                input: &mut VecDeque<AssignOrRvalueNode>
+                mut input: VecDeque<AssignOrRvalueNode>
             ) -> Option<RvalueNode> {
                 if input.len() % 2 != 1 {  // the number of tokens is even
                     return None;
@@ -837,21 +853,25 @@ impl Parse for RvalueNode {
 
                     if let AssignOrRvalueNode::RvalueNode(
                         RvalueNode {
-                            rvalue: Rvalue::Lvalue(lhs), ..
+                            rvalue, ..
                         }) = lhs {
-                        if let AssignOrRvalueNode::Assign(assign,
-                                                          position) = assign {
-                            if let AssignOrRvalueNode::RvalueNode(rhs) = rhs {
-                                input.push_back(AssignOrRvalueNode::RvalueNode(
-                                    RvalueNode::from(
-                                        (position,
-                                         Rvalue::Assign {
-                                             lhs,
-                                             assign,
-                                             rhs: Box::new(rhs),
-                                         }))
-                                ));
-                                continue;
+                        if let Rvalue::Lvalue(lhs) = &*rvalue {
+                            if let AssignOrRvalueNode::Assign(assign,
+                                                              position) = assign {
+                                if let AssignOrRvalueNode::RvalueNode(rhs) = rhs {
+                                    input.push_back(AssignOrRvalueNode::RvalueNode(
+                                        RvalueNode {
+                                            position,
+                                            rvalue: Rc::new(Rvalue::Assign {
+                                                lhs: lhs.clone(),
+                                                assign,
+                                                rhs: Rc::new(rhs),
+                                            }),
+                                        }
+                                    ));
+
+                                    continue;
+                                }
                             }
                         }
                     }
@@ -869,25 +889,27 @@ impl Parse for RvalueNode {
             }
 
             let mut on_false_stack = Vec::<(RvalueNode, TokenPos)>::new();
-            let mut buff = VecDeque::<AssignOrRvalueNode>::new();
+            let mut buff = Cell::<VecDeque<AssignOrRvalueNode>>::default();
 
             while let Some(tok_or_rv_node) = input.pop() {
                 match tok_or_rv_node {
                     TokenOrRvalueNode::Token(
                         Token {
-                            r#type: TokenType::Operator(Operator::Assign(assign)), pos, ..
+                            token: WrappedToken::Operator(Operator::Assign(assign)), pos, ..
                         }) =>
-                        buff.push_front(AssignOrRvalueNode::Assign(assign, pos)),
+                        buff.get_mut().push_front(AssignOrRvalueNode::Assign(assign, pos)),
+
                     TokenOrRvalueNode::RvalueNode(rv_node) =>
-                        buff.push_front(AssignOrRvalueNode::RvalueNode(rv_node)),
+                        buff.get_mut().push_front(AssignOrRvalueNode::RvalueNode(rv_node)),
+
                     TokenOrRvalueNode::Token(t) => {
-                        match t.r#type {
-                            TokenType::Colon => {
-                                if buff.len() != 1 {
+                        match t.token {
+                            WrappedToken::Colon => {
+                                if buff.get_mut().len() != 1 {
                                     return None;
                                 }
 
-                                let next_rvalue = buff.pop_front()?;
+                                let next_rvalue = buff.get_mut().pop_front()?;
                                 if let AssignOrRvalueNode::RvalueNode(
                                     rv_node
                                 ) = next_rvalue {
@@ -897,14 +919,13 @@ impl Parse for RvalueNode {
                                 }
                             }
 
-                            TokenType::QuestionMark => {
+                            WrappedToken::QuestionMark => {
                                 if input.is_empty() {  // ? ... : ...
                                     return None;
                                 }
 
                                 let (on_false, colon_pos) = on_false_stack.pop()?;
-                                let on_true = parse_assignments(&mut buff)?;
-                                buff.clear();
+                                let on_true = parse_assignments(buff.take())?;
 
                                 if let Some(
                                     TokenOrRvalueNode::RvalueNode(condition)
@@ -912,21 +933,22 @@ impl Parse for RvalueNode {
                                     let condition =
                                         if let Some(
                                             truth_value
-                                        ) = condition.to_truth_value() {
+                                        ) = condition.try_to_truth_value() {
                                             truth_value
                                         } else {
                                             condition
                                         };
 
                                     input.push(TokenOrRvalueNode::RvalueNode(
-                                        RvalueNode::from(
-                                            (t.pos,
-                                             Rvalue::ConditionalExpression {
-                                                 condition: Box::new(condition),
-                                                 on_true: Box::new(on_true),
-                                                 on_false: Box::new(on_false),
-                                                 colon_pos,
-                                             }))
+                                        RvalueNode {
+                                            position: t.pos,
+                                            rvalue: Rc::new(Rvalue::ConditionalExpression {
+                                                condition: Rc::new(condition),
+                                                on_true: Rc::new(on_true),
+                                                on_false: Rc::new(on_false),
+                                                colon_pos,
+                                            }),
+                                        },
                                     ));
                                 }
                             }
@@ -941,7 +963,7 @@ impl Parse for RvalueNode {
             }
 
             if input.is_empty() {
-                return parse_assignments(&mut buff);
+                return parse_assignments(buff.take());
             }
 
             if input.len() != 1 {
