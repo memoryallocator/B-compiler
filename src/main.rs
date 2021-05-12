@@ -7,6 +7,7 @@ mod lexical_analyzer;
 mod parser;
 mod config;
 mod code_generator;
+mod ast;
 
 fn process_command_line_arguments()
     -> Result<(String, CompilerOptions), String> {

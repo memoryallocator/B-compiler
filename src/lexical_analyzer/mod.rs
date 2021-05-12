@@ -1,7 +1,6 @@
 use std::*;
 use cell::Cell;
 use collections::HashMap;
-use rc::Rc;
 
 use crate::config::*;
 use token::*;
@@ -197,7 +196,7 @@ impl LexicalAnalyzer<'_> {
                         res.push(Token {
                             token: WrappedToken::Constant(Constant {
                                 constant_type,
-                                value: Rc::new(buffer.take()),
+                                value: buffer.take(),
                             }),
                             pos,
                         })
@@ -255,7 +254,7 @@ impl LexicalAnalyzer<'_> {
                             });
                         } else {
                             res.push(Token {
-                                token: WrappedToken::Name(Rc::new(name)),
+                                token: WrappedToken::Name(name),
                                 pos: token_pos,
                             });
                         }
@@ -297,7 +296,7 @@ impl LexicalAnalyzer<'_> {
                                         } else {
                                             ConstantType::Decimal
                                         },
-                                        value: Rc::new(number_as_str),
+                                        value: number_as_str,
                                     }
                                 ),
                                 pos: token_pos,

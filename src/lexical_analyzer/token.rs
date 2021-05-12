@@ -1,6 +1,5 @@
 use std::*;
 use convert::TryFrom;
-use rc::Rc;
 use borrow::Borrow;
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Hash)]
@@ -75,7 +74,7 @@ pub(crate) enum ConstantType {
 #[derive(PartialEq, Eq, Clone, Debug, Hash)]
 pub(crate) struct Constant {
     pub(crate) constant_type: ConstantType,
-    pub(crate) value: Rc<String>,
+    pub(crate) value: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -195,7 +194,7 @@ pub(crate) enum WrappedToken {
     Colon,
     Bracket(Bracket),
     QuestionMark,
-    Name(Rc<String>),
+    Name(String),
     Constant(Constant),
 }
 
@@ -212,14 +211,12 @@ impl From<(usize, usize)> for TokenPos {
     }
 }
 
-impl TryFrom<Rc<String>> for TokenPos {
+impl TryFrom<&str> for TokenPos {
     type Error = ();
 
-    fn try_from(s: Rc<String>) -> Result<Self, Self::Error> {
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
         let line_and_col: Vec<&str> =
-            s.as_ref()
-                .split(',')
-                .collect();
+            s.split(',').collect();
 
         if line_and_col.len() != 2 {
             return Err(());
