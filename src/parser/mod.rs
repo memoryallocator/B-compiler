@@ -6,11 +6,17 @@ use hash::Hash;
 
 use token::*;
 
-use crate::ast::*;
+use crate::parser::ast::*;
+use crate::parser::ast::flat_ast::*;
+use crate::parser::analyzer::Analyzer;
 use crate::config::*;
 use crate::lexical_analyzer::token;
 
+pub mod ast;
 mod expression_parser;
+mod analyzer;
+
+pub(crate) type FlatAst = Vec<FlatNodeAndPos>;
 
 pub(crate) trait Parse {
     fn parse(input: &[Token]) -> Result<(Self, usize), ()>
@@ -199,12 +205,12 @@ impl Parse for VectorDefinitionNode {
     }
 }
 
-fn parse_name_list(tokens: &[Token]) -> Result<HashMap<String, (TokenPos, usize)>, ()> {
+fn parse_name_list(tokens: &[Token]) -> Result<Vec<(String, TokenPos)>, ()> {
     if tokens.is_empty() {
         return Ok(Default::default());
     }
 
-    let mut res = HashMap::<String, (TokenPos, usize)>::new();
+    let mut res = HashMap::<String, (usize, TokenPos)>::new();
     loop {
         let name_idx = res.len() * 2;
         let name_pos;
@@ -212,10 +218,7 @@ fn parse_name_list(tokens: &[Token]) -> Result<HashMap<String, (TokenPos, usize)
         let comma_idx;
 
         if let Some(
-            Token {
-                token: WrappedToken::Name(tok_name),
-                pos
-            }
+            Token { token: WrappedToken::Name(tok_name), pos }
         ) = tokens.get(name_idx) {
             name_pos = *pos;
             name = tok_name.clone();
@@ -227,11 +230,23 @@ fn parse_name_list(tokens: &[Token]) -> Result<HashMap<String, (TokenPos, usize)
         if res.contains_key(&*name) {
             return Err(());  // duplicate found
         }
-        res.insert(name, (name_pos, res.len()));
+        res.insert(name, (res.len(), name_pos));
 
         match tokens.get(comma_idx) {
             Some(Token { token: WrappedToken::Comma, .. }) => (),  // OK, matched "name ,"
-            None => return Ok(res),  // end of input, matched "[name_list ,] name"
+            None => {  // end of input, matched "[name_list ,] name"
+                let mut res = res
+                    .into_iter()
+                    .map(|(k, v)| (k, v))
+                    .collect::<Vec<(String, (usize, TokenPos))>>();
+
+                res.sort_unstable_by(|(_, (lhs_order, _)), (_, (rhs_order, _))|
+                    lhs_order.partial_cmp(rhs_order).unwrap());
+
+                return Ok(res.into_iter()
+                    .map(|(name, (_, pos))| (name, pos))
+                    .collect());
+            }
             Some(_) => return Err(()),  // the next symbol is not a comma
         }
     }
@@ -411,26 +426,37 @@ impl Parse for AutoDeclarationNode {
 
 fn get_auto_decl_list(
     tokens: &[Token]
-) -> Result<HashMap<AutoDeclaration, (TokenPos, usize)>, ()> {
+) -> Result<Vec<AutoDeclaration>, ()> {
     if tokens.is_empty() {
         return Err(());
     }
 
-    let mut res = HashMap::<AutoDeclaration, (TokenPos, usize)>::new();
+    let mut res = HashMap::<String, (AutoDeclaration, usize)>::new();
 
     let mut i: usize = 0;
     while i < tokens.len() {
         while let Ok(
             (auto_decl, adv)
         ) = AutoDeclaration::parse(&tokens[i..]) {
-            if let Some(_) = res.insert(auto_decl,
-                                        (tokens[i].pos, res.len())) {
+            if let Some(_prev_decl) = res.insert(auto_decl.name.clone(),
+                                                 (auto_decl, res.len())) {
                 return Err(());
             }
             i += adv;
 
             match tokens.get(i) {
-                None => return Ok(res),
+                None => {
+                    let mut res = res.into_iter()
+                        .map(|(k, v)| v)
+                        .collect::<Vec<(AutoDeclaration, usize)>>();
+
+                    res.sort_unstable_by(|(_, lhs_order), (_, rhs_order)|
+                        lhs_order.partial_cmp(rhs_order).unwrap());
+
+                    return Ok(res.into_iter()
+                        .map(|(auto_decl, _)| auto_decl)
+                        .collect());
+                }
                 Some(Token {
                          token: WrappedToken::Comma, ..
                      }) => {
@@ -660,7 +686,7 @@ impl Parse for IfNode {
         let (body, adv) = StatementNode::parse(&input[toks_consumed..])?;
         toks_consumed += adv;
 
-        let else_body =
+        let r#else =
             if let Some(tok) = input.get(toks_consumed) {
                 if tok.token == WrappedToken::ReservedName(ReservedName::ControlStatement(Else)) {
                     toks_consumed += 1;
@@ -672,7 +698,7 @@ impl Parse for IfNode {
                         &input[toks_consumed..])?;
                     toks_consumed += adv;
 
-                    Some(else_body)
+                    Some(ElseNode { position: tok.pos, else_body })
                 } else {
                     None
                 }
@@ -683,7 +709,7 @@ impl Parse for IfNode {
         Ok((IfNode {
             condition,
             body,
-            else_body,
+            r#else,
         }, toks_consumed))
     }
 }
@@ -813,7 +839,7 @@ impl Parse for GotoNode {
         let rvalue = &input[1..semicolon_pos];
 
         return Ok((GotoNode {
-            label: RvalueNode::parse_exact(&rvalue)?
+            label: RvalueNode::parse_exact(&rvalue)?,
         }, toks_consumed));
     }
 }
@@ -842,7 +868,7 @@ impl Parse for ReturnNode {
         let toks_trim = &input[..semicolon_pos];
 
         return Ok((ReturnNode {
-            rvalue: Some(extract_bracketed_rvalue(&toks_trim[1..], Round)?.0)
+            rvalue: Some(extract_bracketed_rvalue(&toks_trim[1..], Round)?.0),
         }, toks_consumed));
     }
 }
@@ -880,9 +906,7 @@ impl Parse for BreakNode {
                 pos, ..
             },
             Token { token: WrappedToken::Semicolon, .. }] =>
-                Ok((BreakNode {
-                    position: pos.clone(),
-                }, 2)),
+                Ok((BreakNode {}, 2)),
             _ => Err(())
         }
     }
@@ -1045,7 +1069,7 @@ impl ParseExact for ProgramNode {}
 pub(crate) struct Parser<'a> {
     pub(crate) compiler_options: CompilerOptions,
     pub(crate) standard_library_names: &'a HashSet<StandardLibraryName>,
-    pub(crate) source_code: Option<&'a str>,
+    pub(crate) source_code: &'a str,
 }
 
 #[derive(PartialEq)]
@@ -1198,30 +1222,43 @@ impl Parser<'_> {
     }
 
     pub(crate) fn run(
-        &mut self,
+        &self,
         tokens: &[Token],
-    ) -> Result<ProgramNode, Issue> {
+    ) -> (Vec<Issue>, Result<FlatAst, ()>) {
         let tokens =
             match Parser::find_brackets_pairs(tokens.into_iter()) {
                 (BracketsStatus::Ok, processed_tokens) => processed_tokens.unwrap(),
                 (BracketsStatus::NotClosed(pos), _) => {
-                    return Err(Issue::BracketNotClosed(pos));
+                    return (vec![Issue::BracketNotClosed(pos)], Err(()));
                 }
                 (BracketsStatus::NotOpened(pos), _) => {
-                    return Err(Issue::BracketNotOpened(pos));
+                    return (vec![Issue::BracketNotOpened(pos)], Err(()));
                 }
             };
 
         if tokens.is_empty() {
-            return Err(Issue::EmptyTokenStream);
+            return (vec![Issue::EmptyTokenStream], Err(()));
         }
 
         let prog_node = ProgramNode::parse_exact(&tokens);
         if let Err(_err) = prog_node {
-            return Err(Issue::ParsingError);
-            // TODO: failure analysis & detailed error report
+            return (vec![Issue::ParsingError], Err(()));
         }
 
-        Ok(prog_node.unwrap())
+        let analyzer = Analyzer {
+            compiler_options: self.compiler_options,
+            source_code: self.source_code,
+        };
+        let res = prog_node.unwrap().flatten_node();
+
+        let analysis_result = analyzer.run(&res);
+        let issues = analysis_result.0;
+
+        return (issues,
+                if let Ok(()) = analysis_result.1 {
+                    Ok(res)
+                } else {
+                    Err(())
+                });
     }
 }

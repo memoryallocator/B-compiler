@@ -6,8 +6,8 @@ use crate::config::*;
 mod lexical_analyzer;
 mod parser;
 mod config;
-mod code_generator;
-mod ast;
+mod intermediate_code_generator;
+mod machine_code_generator;
 
 fn process_command_line_arguments()
     -> Result<(String, CompilerOptions), String> {
@@ -56,58 +56,46 @@ fn main() {
         process::exit(1);
     });
 
-    assert!(source_code.chars().all(|c| c.is_ascii()), "The source code file must be in ASCII");
+    if !source_code.chars().all(|c| c.is_ascii()) {
+        eprintln!("The source code file must be in ASCII");
+        process::exit(1)
+    }
 
-    let mut lexical_analyzer = lexical_analyzer::LexicalAnalyzer {
+    let processor = lexical_analyzer::LexicalAnalyzer {
         compiler_options: &compiler_options,
         escape_sequences: &get_escape_sequences(),
         reserved_symbols: &get_reserved_symbols(),
     };
 
-    let tokens = lexical_analyzer.run(&source_code);
-    mem::drop(lexical_analyzer);
-
+    let tokens = processor.run(&source_code);
     let tokens = tokens.unwrap_or_else(
         |err| {
             eprintln!("Lexical analyzer returned an error: {}", err);
             process::exit(1);
         });
 
-    let standard_library_names = &get_standard_library_names();
-
-    let mut parser = parser::Parser {
+    let processor = parser::Parser {
         compiler_options,
-        source_code: Some(&source_code),
-        standard_library_names,
+        source_code: &source_code,
+        standard_library_names: &get_standard_library_names(),
     };
 
-    let ast = parser.run(&tokens);
-    mem::drop(parser);
-
+    let (issues, ast) = processor.run(&tokens);
     let ast = ast.unwrap_or_else(
-        |err| {
-            eprintln!("Parser returned an error: {}", err);
+        |()| {
+            eprintln!("Cannot proceed");
             process::exit(1);
         });
 
-    let code_generator = code_generator::CodeGenerator {
+    let processor = intermediate_code_generator::IntermediateCodeGenerator {
         compiler_options,
-        standard_library_names,
-        source_code: Some(&*source_code),
     };
+    let intermediate_code = processor.run(&ast);
 
-    let res = code_generator.run(&ast);
-    mem::drop(code_generator);
-
-    for warning in res.0 {
-        eprintln!("{}", warning);
-    }
-
-    let res = res.1.unwrap_or_else(
-        |err| {
-            eprintln!("Code generator returned an error: {}", err);
-            process::exit(1);
-        });
+    let processor = machine_code_generator::MachineCodeGenerator {
+        compiler_options,
+    };
+    let res = processor.run();
 
     println!("{}", &res);
 }

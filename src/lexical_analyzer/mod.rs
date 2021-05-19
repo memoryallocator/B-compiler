@@ -108,12 +108,6 @@ fn parse_operator<'a, I>(op: I) -> Option<(Operator, usize)>
     );
 }
 
-// #[derive(PartialEq, Eq, Clone, Copy)]
-// enum CharOrString {
-//     Char,
-//     String,
-// }
-
 impl LexicalAnalyzer<'_> {
     fn tokenize(&self, source_code: &str) -> Result<Vec<Token>, String> {
         let mut res = Vec::<Token>::new();
@@ -318,6 +312,7 @@ impl LexicalAnalyzer<'_> {
                             pos: token_pos,
                         }),
 
+                    '\r' => (), // for Windows
                     _ =>
                         if let Some(
                             (op, tokens_read)
@@ -350,7 +345,7 @@ impl LexicalAnalyzer<'_> {
     }
 
     pub(crate) fn run(
-        &mut self,
+        &self,
         source_code: &str,
     ) -> Result<Vec<Token>, String> {
         Ok(self.tokenize(&source_code)?)

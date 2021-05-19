@@ -1,7 +1,6 @@
-mod flat_ast;
+pub(crate) mod flat_ast;
 
 use std::*;
-use collections::HashMap;
 use convert::TryFrom;
 
 use crate::lexical_analyzer::token;
@@ -53,7 +52,7 @@ pub(crate) struct VectorDefinitionNode {
 pub(crate) struct FunctionDefinitionNode {
     pub(crate) position: TokenPos,
     pub(crate) name: String,
-    pub(crate) parameters: HashMap<String, (TokenPos, usize)>,
+    pub(crate) parameters: Vec<(String, TokenPos)>,
     pub(crate) body: StatementNode,
 }
 
@@ -67,14 +66,14 @@ pub(crate) struct AutoDeclaration {
 #[derive(Debug)]
 pub(crate) struct AutoDeclarationNode {
     pub(crate) position: TokenPos,
-    pub(crate) declarations: HashMap<AutoDeclaration, (TokenPos, usize)>,
+    pub(crate) declarations: Vec<AutoDeclaration>,
     pub(crate) next_statement: StatementNode,
 }
 
 #[derive(Debug)]
 pub(crate) struct ExternDeclarationNode {
     pub(crate) position: TokenPos,
-    pub(crate) names: HashMap<String, (TokenPos, usize)>,
+    pub(crate) names: Vec<(String, TokenPos)>,
     pub(crate) next_statement: StatementNode,
 }
 
@@ -262,10 +261,16 @@ pub(crate) struct CaseNode {
 }
 
 #[derive(Debug)]
+pub(crate) struct ElseNode {
+    pub(crate) position: TokenPos,
+    pub(crate) else_body: StatementNode,
+}
+
+#[derive(Debug)]
 pub(crate) struct IfNode {
     pub(crate) condition: RvalueNode,
     pub(crate) body: StatementNode,
-    pub(crate) else_body: Option<StatementNode>,
+    pub(crate) r#else: Option<ElseNode>,
 }
 
 #[derive(Debug)]
@@ -296,9 +301,7 @@ pub(crate) struct RvalueAndSemicolonNode {
 }
 
 #[derive(Debug)]
-pub(crate) struct BreakNode {
-    pub(crate) position: TokenPos,
-}
+pub(crate) struct BreakNode {}
 
 #[derive(Debug)]
 pub(crate) enum DeclarationNode {

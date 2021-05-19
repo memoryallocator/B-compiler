@@ -2,7 +2,7 @@ use std::*;
 use collections::{HashMap, HashSet};
 use fmt;
 
-use crate::ast::*;
+use crate::parser::ast::*;
 use crate::lexical_analyzer::token;
 use token::*;
 

@@ -6,15 +6,16 @@ use cell::Cell;
 use crate::lexical_analyzer::token;
 use token::*;
 
-use crate::ast::*;
-use crate::ast::ConstantNode;
+use crate::parser::ast::*;
 
 use crate::parser::{Parse, ParseExact, extract_bracketed_expression};
 
 #[derive(Debug)]
 enum BracketedExpression {
-    RoundBracketedExpression(RvalueNode),  // examples: (a), (a + b)
-    FunctionArgumentList(Vec<RvalueNode>),  // examples: (a, b, c), ()
+    RoundBracketedExpression(RvalueNode),
+    // examples: (a), (a + b)
+    FunctionArgumentList(Vec<RvalueNode>),
+    // examples: (a, b, c), ()
     SquareBracketedExpression(RvalueNode),
 }
 
@@ -812,10 +813,7 @@ impl Parse for RvalueNode {
                     let assign = input.pop_back().ok_or(())?;
                     let lhs = input.pop_back().ok_or(())?;
 
-                    if let AssignOrRvalueNode::RvalueNode(
-                        RvalueNode {
-                            rvalue, ..
-                        }) = lhs {
+                    if let AssignOrRvalueNode::RvalueNode(RvalueNode { rvalue, .. }) = lhs {
                         if let Rvalue::Lvalue(lhs) = &*rvalue {
                             if let AssignOrRvalueNode::Assign(assign,
                                                               position) = assign {
