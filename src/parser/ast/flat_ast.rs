@@ -9,14 +9,16 @@ pub(crate) trait FlattenNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos>;
 }
 
-enum NameOrConstant {
+#[derive(Clone)]
+pub(crate) enum NameOrConstant {
     Name(String),
     Constant(token::Constant),
 }
 
-struct Ival {
-    value: NameOrConstant,
-    pos: TokenPos,
+#[derive(Clone)]
+pub(crate) struct Ival {
+    pub(crate) value: NameOrConstant,
+    pub(crate) pos: TokenPos,
 }
 
 impl From<ast::Ival> for Ival {
@@ -34,12 +36,13 @@ impl From<ast::Ival> for Ival {
     }
 }
 
-enum FlatDefinition {
+#[derive(Clone)]
+pub(crate) enum FlatDefinition {
     VarDef { name: String, initial_value: Option<Ival> },
     VecDef {
         name: String,
         specified_size: Option<ConstantNode>,
-        initial_values: Option<Vec<Ival>>,
+        initial_values: Vec<Ival>,
     },
     FnDef {
         name: String,
@@ -47,32 +50,34 @@ enum FlatDefinition {
     },
 }
 
-enum FlatDeclarationType {
+#[derive(Clone)]
+pub(crate) enum FlatDeclarationType {
     Auto(Option<ConstantNode>),
     Extern,
     Label,
 }
 
-enum FlatNode {
+#[derive(Clone)]
+pub(crate) enum FlatNode {
+    RestoreScope,
     Def(FlatDefinition),
     Decl(FlatDeclarationType, String),
     Compound,
-    EndOfCompound,
     Rvalue(Rvalue),
-    If,
+    If(Rvalue),
     Else,
-    While,
-    Switch,
-    EndOfControlStatement,
+    While(Rvalue),
+    Switch(Rvalue),
     Break,
-    Goto,
+    Goto(Rvalue),
     Case(Option<ConstantNode>),
-    Return { return_last_rvalue: bool },
+    Return(Option<Rvalue>),
 }
 
-pub struct FlatNodeAndPos {
-    node: FlatNode,
-    pos: TokenPos,
+#[derive(Clone)]
+pub(crate) struct FlatNodeAndPos {
+    pub(crate) node: FlatNode,
+    pub(crate) pos: TokenPos,
 }
 
 type FlatAst = Vec<FlatNodeAndPos>;
@@ -115,11 +120,10 @@ impl FlattenNode for VectorDefinitionNode {
             node: FlatNode::Def(FlatDefinition::VecDef {
                 name: self.name,
                 specified_size: self.specified_size,
-                initial_values: if let Some(ivals) = self.initial_values {
-                    Some(ivals.into_iter().map(|ival| Ival::from(ival)).collect())
-                } else {
-                    None
-                },
+                initial_values: self.initial_values
+                    .into_iter()
+                    .map(|ival| Ival::from(ival))
+                    .collect(),
             }),
             pos: self.position,
         }]
@@ -140,41 +144,40 @@ impl FlattenNode for FunctionDefinitionNode {
     }
 }
 
+fn control_statement_require_end_marker(node: &Statement) -> bool {
+    use Statement::*;
+    match node {
+        Compound(_) | Switch(_) | If(_) | While(_) => true,
+        _ => false,
+    }
+}
+
 impl FlattenNode for StatementNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
-        match *self.statement {
+        let append_end_marker = control_statement_require_end_marker(&self.statement);
+        let mut res = match *self.statement {
             Statement::NullStatement => vec![],
             Statement::Compound(comp_stmt) => comp_stmt.flatten_node(),
             Statement::Declaration(decl) => decl.flatten_node(),
 
             Statement::Return(ret) => {
-                let (return_last_rvalue, mut res) =
-                    if let Some(rv) = ret.rvalue {
-                        (true, vec![FlatNodeAndPos {
-                            pos: rv.position,
-                            node: FlatNode::Rvalue(*rv.rvalue),
-                        }])
-                    } else {
-                        (false, vec![])
-                    };
-                res.push(FlatNodeAndPos {
-                    node: FlatNode::Return { return_last_rvalue },
+                vec![FlatNodeAndPos {
                     pos: self.position,
-                });
-                res
+                    node: FlatNode::Return(
+                        if let Some(rv) = ret.rvalue {
+                            Some(*rv.rvalue)
+                        } else {
+                            None
+                        }),
+                }]
             }
 
             Statement::Switch(sw) => {
                 let mut res = vec![
                     FlatNodeAndPos {
-                        pos: sw.rvalue.position,
-                        node: FlatNode::Rvalue(*sw.rvalue.rvalue),
-                    },
-                    FlatNodeAndPos {
-                        node: FlatNode::Switch,
+                        node: FlatNode::Switch(*sw.rvalue.rvalue),
                         pos: self.position,
-                    },
-                ];
+                    }];
                 res.append(&mut sw.body.flatten_node());
                 res
             }
@@ -191,11 +194,7 @@ impl FlattenNode for StatementNode {
             Statement::If(r#if) => {
                 let mut res = vec![
                     FlatNodeAndPos {
-                        pos: r#if.condition.position,
-                        node: FlatNode::Rvalue(*r#if.condition.rvalue),
-                    },
-                    FlatNodeAndPos {
-                        node: FlatNode::If,
+                        node: FlatNode::If(*r#if.condition.rvalue),
                         pos: self.position,
                     }];
                 res.append(&mut r#if.body.flatten_node());
@@ -207,55 +206,39 @@ impl FlattenNode for StatementNode {
                     });
                     res.append(&mut else_node.else_body.flatten_node());
                 }
-
-                res.push(FlatNodeAndPos {
-                    node: FlatNode::EndOfControlStatement,
-                    pos: res.last().unwrap().pos,
-                });
                 res
             }
 
             Statement::While(wh) => {
                 let mut res = vec![
                     FlatNodeAndPos {
-                        pos: wh.condition.position,
-                        node: FlatNode::Rvalue(*wh.condition.rvalue),
-                    },
-                    FlatNodeAndPos {
-                        node: FlatNode::While,
+                        node: FlatNode::While(*wh.condition.rvalue),
                         pos: self.position,
                     }];
-
                 res.append(&mut wh.body.flatten_node());
-                res.push(
-                    FlatNodeAndPos {
-                        node: FlatNode::EndOfControlStatement,
-                        pos: res.last().unwrap().pos,
-                    });
                 res
             }
 
             Statement::Goto(goto) => {
-                vec![
-                    FlatNodeAndPos {
-                        pos: goto.label.position,
-                        node: FlatNode::Rvalue(*goto.label.rvalue),
-                    },
-                    FlatNodeAndPos {
-                        node: FlatNode::Goto,
-                        pos: self.position,
-                    }]
-            }
-
-            Statement::RvalueAndSemicolon(rv) => rv.flatten_node(),
-
-            Statement::Break(_br) => {
                 vec![FlatNodeAndPos {
-                    node: FlatNode::Break,
+                    node: FlatNode::Goto(*goto.label.rvalue),
                     pos: self.position,
                 }]
             }
+            Statement::RvalueAndSemicolon(rv) => rv.flatten_node(),
+
+            Statement::Break(_br) => {
+                vec![FlatNodeAndPos { node: FlatNode::Break, pos: self.position }]
+            }
+        };
+
+        if append_end_marker {
+            res.push(FlatNodeAndPos {
+                node: FlatNode::RestoreScope,
+                pos: res.last().unwrap().pos,
+            })
         }
+        res
     }
 }
 
@@ -267,17 +250,8 @@ impl FlattenNode for CompoundStatementNode {
             .map(|stmt| stmt.flatten_node())
             .flatten()
             .collect();
-        let last_stmt_pos = if let Some(last_stmt) = body.last() {
-            last_stmt.pos
-        } else {
-            self.position
-        };
 
         res.append(&mut body);
-        res.push(FlatNodeAndPos {
-            node: FlatNode::EndOfCompound,
-            pos: last_stmt_pos,
-        });
         res
     }
 }

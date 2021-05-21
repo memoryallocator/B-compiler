@@ -45,7 +45,7 @@ pub(crate) struct VectorDefinitionNode {
     pub(crate) position: TokenPos,
     pub(crate) name: String,
     pub(crate) specified_size: Option<ConstantNode>,
-    pub(crate) initial_values: Option<Vec<Ival>>,
+    pub(crate) initial_values: Vec<Ival>,
 }
 
 #[derive(Debug)]

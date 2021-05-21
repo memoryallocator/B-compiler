@@ -11,30 +11,43 @@ pub(crate) enum Issue {
     BracketNotClosed(TokenPos),
     EmptyTokenStream,
     ParsingError,
-    NameNotDefined {
-        name: String,
-        pos: TokenPos,
+    NameNotDefined { name: String, pos: TokenPos },
+    NameRedefined { curr_def: (String, TokenPos), prev_def_pos: Option<TokenPos> },
+    VecWithNoSizeAndInits(String, TokenPos),
+    VecSizeIsNotANumber { vec_def: (String, TokenPos), size: String },
+    VecTooManyIvals {
+        vec_def: (String, TokenPos),
+        ivals_len: usize,
+        specified_size_plus_1: usize,
     },
-    NameRedefined { name: String, curr_def_pos: TokenPos, prev_def_pos: Option<TokenPos> },
-    // VecSizeIsString(VecDeclOrDef),
-    InitVarWithItself(DefinitionNode, TokenPos),
-    StandardNameRedefined(DefinitionNode),
-    VecWithNoSizeAndInits(VectorDefinitionNode),
-    VecSizeIsNotANumber(VectorDefinitionNode),
     FnBodyIsNullStatement(FunctionDefinitionNode),
-    EmptyCompound(CompoundStatementNode),
+    IntegerConstantIsTooLong(String, TokenPos),
 }
 
 impl fmt::Display for Issue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Issue::*;
-        let msg =
-            match self {
-                ParsingError => "Failed to parse",
-                _ => todo!()
-            };
+        write!(f, "{}", match self {
+            ParsingError => "Failed to parse".to_string(),
 
-        write!(f, "{}", msg)
+            NameRedefined { curr_def: (name, pos), prev_def_pos } => {
+                format!("Name {}, defined {}, is redefined at {}",
+                        name,
+                        if let Some(prev_def_pos) = prev_def_pos {
+                            format!("at {}", prev_def_pos)
+                        } else {
+                            "in the standard library".to_string()
+                        },
+                        pos)
+            }
+
+            VecSizeIsNotANumber { vec_def: (name, def_pos), size } => {
+                format!("Size {} of vector {}, defined at {}, is not a number",
+                        size, name, def_pos)
+            }
+
+            _ => todo!()
+        })
     }
 }
 
@@ -168,16 +181,29 @@ pub(crate) fn get_reserved_symbols() -> ReservedSymbolsTable {
 }
 
 #[derive(Eq, PartialEq, Hash)]
-pub(crate) enum StandardLibraryName {
-    Function { fn_name: String, parameter_list_length: Option<usize> },
-    Variable { var_name: String },
+pub(crate) enum NumberOfParameters {
+    Exact(usize),
+    AtLeast(usize),
+}
+
+#[derive(Eq, PartialEq, Hash)]
+pub(crate) enum VarOrVecOrFnInfo {
+    Variable,
+    Vector { size: usize },
+    Function { number_of_parameters: NumberOfParameters },
+}
+
+#[derive(Eq, PartialEq, Hash)]
+pub(crate) struct StandardLibraryName {
+    pub(crate) name: String,
+    pub(crate) info: VarOrVecOrFnInfo,
 }
 
 pub(crate) fn get_standard_library_names() -> HashSet<StandardLibraryName> {
-    let mut std_lib_fns = vec![];
+    let mut std_lib_fns_with_exact_num_of_params = Vec::<(&str, usize)>::new();
 
-    std_lib_fns.append(&mut (|| {
-        let io_routines_without_printf = vec![
+    std_lib_fns_with_exact_num_of_params.append(&mut (|| {
+        vec![
             ("getchar", 0),
             ("putchar", 1),
             ("openr", 2),
@@ -189,57 +215,68 @@ pub(crate) fn get_standard_library_names() -> HashSet<StandardLibraryName> {
             ("flush", 0),
             ("reread", 0)
         ].into_iter()
-            .map(|x| (x.0, Some(x.1)))
-            .collect();
-
-        let printf = ("printf", None);
-
-        let mut io_routines: Vec<(&str, Option<usize>)> = io_routines_without_printf;
-        io_routines.push(printf);
-
-        io_routines
+            .map(|x| (x.0, x.1))
+            .collect()
     })());
 
-    std_lib_fns.push(("ioerrors", Some(1)));
+    std_lib_fns_with_exact_num_of_params.push(("ioerrors", 1));
 
-    std_lib_fns.append(&mut (|| {
-        let mut str_manip: Vec<(&str, Option<usize>)> = vec![
+    std_lib_fns_with_exact_num_of_params.append(&mut (|| {
+        vec![
             ("char", 2),
             ("lchar", 3),
             ("getarg", 3),
         ].into_iter()
-            .map(|x| (x.0, Some(x.1)))
-            .collect();
-
-        str_manip.push(("concat", None));
-        str_manip
+            .map(|x| (x.0, x.1))
+            .collect()
     })());
 
-    std_lib_fns.append(&mut (|| {
-        let other_functions: Vec<(&str, Option<usize>)> = vec![
+    std_lib_fns_with_exact_num_of_params.append(&mut (|| {
+        vec![
             ("getvec", 1),
             ("rlsevec", 2),
             ("nargs", 0),
             ("exit", 0)
         ].into_iter()
-            .map(|x| (x.0, Some(x.1)))
-            .collect();
-
-        other_functions
+            .map(|x| (x.0, x.1))
+            .collect()
     })());
 
-    let std_lib_vars: HashSet<StandardLibraryName> = vec!["wr.unit", "rd.unit"].into_iter()
-        .map(|var_name|
-            StandardLibraryName::Variable { var_name: var_name.to_string() })
-        .collect();
+    let std_lib_fns_with_exact_num_of_params = std_lib_fns_with_exact_num_of_params
+        .into_iter()
+        .map(|x| StandardLibraryName {
+            name: x.0.to_string(),
+            info: VarOrVecOrFnInfo::Function {
+                number_of_parameters: NumberOfParameters::Exact(x.1)
+            },
+        })
+        .collect::<HashSet<StandardLibraryName>>();
 
+    let printf = StandardLibraryName {
+        name: "printf".to_string(),
+        info: VarOrVecOrFnInfo::Function { number_of_parameters: NumberOfParameters::AtLeast(1) },
+    };
+    let concat = StandardLibraryName {
+        name: "concat".to_string(),
+        info: VarOrVecOrFnInfo::Function {
+            number_of_parameters: NumberOfParameters::AtLeast(1)
+        },
+    };
+    let mut std_lib_fns_with_variable_num_of_params = HashSet::new();
+    std_lib_fns_with_variable_num_of_params.extend(vec![printf, concat].into_iter());
+
+    let mut std_lib_fns = std_lib_fns_with_exact_num_of_params;
+    std_lib_fns.extend(std_lib_fns_with_variable_num_of_params.into_iter());
+
+    let std_lib_vars: HashSet<StandardLibraryName> = vec!["wr.unit", "rd.unit"]
+        .into_iter()
+        .map(|var_name|
+            StandardLibraryName {
+                name: var_name.to_string(),
+                info: VarOrVecOrFnInfo::Variable,
+            })
+        .collect();
     let mut res = std_lib_vars;
-    res
-        .extend(
-            std_lib_fns.into_iter()
-                .map(|x| StandardLibraryName::Function {
-                    fn_name: x.0.to_string(),
-                    parameter_list_length: x.1,
-                }));
+    res.extend(std_lib_fns);
     res
 }

@@ -8,7 +8,6 @@ use token::*;
 pub mod token;
 
 pub(crate) struct LexicalAnalyzer<'a> {
-    pub(crate) compiler_options: &'a CompilerOptions,
     pub(crate) escape_sequences: &'a HashMap<String, String>,
     pub(crate) reserved_symbols: &'a ReservedSymbolsTable,
 }
@@ -344,10 +343,7 @@ impl LexicalAnalyzer<'_> {
         Ok(res)
     }
 
-    pub(crate) fn run(
-        &self,
-        source_code: &str,
-    ) -> Result<Vec<Token>, String> {
+    pub(crate) fn run(&self, source_code: &str) -> Result<Vec<Token>, String> {
         Ok(self.tokenize(&source_code)?)
     }
 }

@@ -1,20 +1,26 @@
 use std::*;
 use borrow::Borrow;
-use collections::{HashMap, HashSet};
+use collections::HashMap;
 use convert::TryFrom;
 use hash::Hash;
 
 use token::*;
 
 use crate::parser::ast::*;
-use crate::parser::ast::flat_ast::*;
+use crate::parser::ast::flat_ast::{FlatNodeAndPos, FlattenNode};
 use crate::parser::analyzer::Analyzer;
+pub(crate) use crate::parser::analyzer::ScopeTable;
 use crate::config::*;
 use crate::lexical_analyzer::token;
 
 pub mod ast;
 mod expression_parser;
 mod analyzer;
+
+pub(crate) enum DefinedOrImportedHere {
+    Node(FlatNodeAndPos),
+    StandardLibrary,
+}
 
 pub(crate) type FlatAst = Vec<FlatNodeAndPos>;
 
@@ -165,7 +171,7 @@ impl Parse for VectorDefinitionNode {
                             position: name_pos.clone(),
                             name,
                             specified_size,
-                            initial_values: None,
+                            initial_values: vec![],
                         }
                     } else {
                         let mut initial_values = Vec::<Ival>::new();
@@ -189,7 +195,6 @@ impl Parse for VectorDefinitionNode {
                             }
                             next_ival_idx = first_ival_idx + 2 * initial_values.len();
                         }
-                        let initial_values = Some(initial_values);
 
                         VectorDefinitionNode {
                             position: name_pos.clone(),
@@ -447,7 +452,7 @@ fn get_auto_decl_list(
             match tokens.get(i) {
                 None => {
                     let mut res = res.into_iter()
-                        .map(|(k, v)| v)
+                        .map(|(_, v)| v)
                         .collect::<Vec<(AutoDeclaration, usize)>>();
 
                     res.sort_unstable_by(|(_, lhs_order), (_, rhs_order)|
@@ -901,10 +906,7 @@ impl Parse for BreakNode {
         use token::ControlStatementIdentifier::Break;
 
         match &input[..2] {
-            [Token {
-                token: WrappedToken::ReservedName(ReservedName::ControlStatement(Break)),
-                pos, ..
-            },
+            [Token { token: WrappedToken::ReservedName(ReservedName::ControlStatement(Break)), .. },
             Token { token: WrappedToken::Semicolon, .. }] =>
                 Ok((BreakNode {}, 2)),
             _ => Err(())
@@ -1068,7 +1070,6 @@ impl ParseExact for ProgramNode {}
 
 pub(crate) struct Parser<'a> {
     pub(crate) compiler_options: CompilerOptions,
-    pub(crate) standard_library_names: &'a HashSet<StandardLibraryName>,
     pub(crate) source_code: &'a str,
 }
 
@@ -1221,10 +1222,7 @@ impl Parser<'_> {
         (BracketsStatus::NotClosed(stack.pop().unwrap().1.clone()), None)
     }
 
-    pub(crate) fn run(
-        &self,
-        tokens: &[Token],
-    ) -> (Vec<Issue>, Result<FlatAst, ()>) {
+    pub(crate) fn run(&self, tokens: &[Token]) -> (Vec<Issue>, Result<ScopeTable, ()>) {
         let tokens =
             match Parser::find_brackets_pairs(tokens.into_iter()) {
                 (BracketsStatus::Ok, processed_tokens) => processed_tokens.unwrap(),
@@ -1246,7 +1244,6 @@ impl Parser<'_> {
         }
 
         let analyzer = Analyzer {
-            compiler_options: self.compiler_options,
             source_code: self.source_code,
         };
         let res = prog_node.unwrap().flatten_node();
@@ -1255,8 +1252,8 @@ impl Parser<'_> {
         let issues = analysis_result.0;
 
         return (issues,
-                if let Ok(()) = analysis_result.1 {
-                    Ok(res)
+                if let Ok(nodes_to_scopes) = analysis_result.1 {
+                    Ok(nodes_to_scopes)
                 } else {
                     Err(())
                 });

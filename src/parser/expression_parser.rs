@@ -375,7 +375,6 @@ impl Parse for RvalueNode {
                     Operator::IncDec(_)
                     | Operator::Plus | Operator::Minus
                     | Operator::Asterisk | Operator::Ampersand | Operator::Unary(_) => true,
-
                     _ => false
                 }
             }
@@ -407,7 +406,6 @@ impl Parse for RvalueNode {
                             false
                         }
                     }
-
                     Operator::Binary(_) | Operator::Assign(_) => false,
                 }
             }
@@ -453,14 +451,10 @@ impl Parse for RvalueNode {
                                     lvalue: LvalueNode::try_from(&rvalue_node).unwrap(),
                                 }
                             ),
-
                         _ => unreachable!()
                     };
 
-                RvalueNode {
-                    position,
-                    rvalue: Box::new(rvalue),
-                }
+                RvalueNode { position, rvalue: Box::new(rvalue) }
             }
 
             fn try_to_apply_unary_op_to_last_elem_of_vec(

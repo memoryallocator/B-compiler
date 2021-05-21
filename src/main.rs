@@ -62,7 +62,6 @@ fn main() {
     }
 
     let processor = lexical_analyzer::LexicalAnalyzer {
-        compiler_options: &compiler_options,
         escape_sequences: &get_escape_sequences(),
         reserved_symbols: &get_reserved_symbols(),
     };
@@ -77,11 +76,10 @@ fn main() {
     let processor = parser::Parser {
         compiler_options,
         source_code: &source_code,
-        standard_library_names: &get_standard_library_names(),
     };
 
-    let (issues, ast) = processor.run(&tokens);
-    let ast = ast.unwrap_or_else(
+    let (issues, ast_to_scopes_mapping) = processor.run(&tokens);
+    let scope_table = ast_to_scopes_mapping.unwrap_or_else(
         |()| {
             eprintln!("Cannot proceed");
             process::exit(1);
@@ -90,12 +88,12 @@ fn main() {
     let processor = intermediate_code_generator::IntermediateCodeGenerator {
         compiler_options,
     };
-    let intermediate_code = processor.run(&ast);
+    let intermediate_code = processor.run(&scope_table);
 
     let processor = machine_code_generator::MachineCodeGenerator {
         compiler_options,
     };
-    let res = processor.run();
+    let res = processor.run(intermediate_code);
 
     println!("{}", &res);
 }
