@@ -2,9 +2,9 @@ use std::*;
 use collections::{HashMap, HashSet};
 use fmt;
 
-use crate::parser::ast::*;
 use crate::lexical_analyzer::token;
 use token::*;
+use crate::parser::{DefInfoAndPos, DeclInfoAndPos};
 
 pub(crate) enum Issue {
     BracketNotOpened(TokenPos),
@@ -12,7 +12,14 @@ pub(crate) enum Issue {
     EmptyTokenStream,
     ParsingError,
     NameNotDefined { name: String, pos: TokenPos },
-    NameRedefined { curr_def: (String, TokenPos), prev_def_pos: Option<TokenPos> },
+    NameRedefined {
+        curr_def: (String, TokenPos),
+        prev_def: DefInfoAndPos,
+    },
+    NameRedeclared {
+        decl: (String, DeclInfoAndPos),
+        prev_decl: DeclInfoAndPos,
+    },
     VecWithNoSizeAndInits(String, TokenPos),
     VecSizeIsNotANumber { vec_def: (String, TokenPos), size: String },
     VecTooManyIvals {
@@ -20,8 +27,38 @@ pub(crate) enum Issue {
         ivals_len: usize,
         specified_size_plus_1: usize,
     },
-    FnBodyIsNullStatement(FunctionDefinitionNode),
-    IntegerConstantIsTooLong(String, TokenPos),
+    ExternSymbolNotFound {
+        name: String,
+        extern_pos: TokenPos,
+    },
+    DeclShadowsGlobalDef {
+        decl: (String, DeclInfoAndPos),
+        global_def: DefInfoAndPos,
+    },
+    DeclarationShadowsFnParameter {
+        decl: (String, DeclInfoAndPos),
+        param_pos: TokenPos,
+        fn_def: (String, TokenPos),
+    },
+    UnnecessaryImport {
+        curr_decl: (String, TokenPos),
+        prev_import_pos: TokenPos,
+    },
+    DeclarationShadowsPrevious {
+        decl: (String, DeclInfoAndPos),
+        prev_decl: DeclInfoAndPos,
+    },
+    UnexpectedKeyword(TokenPos),
+    CaseEncounteredTwice(TokenPos),
+    IntegerLiteralTooLarge(TokenPos),
+}
+
+fn def_pos_to_string(def_pos: &Option<TokenPos>) -> String {
+    if let Some(def_pos) = def_pos {
+        format!("at {}", def_pos)
+    } else {
+        "in the standard library".to_string()
+    }
 }
 
 impl fmt::Display for Issue {
@@ -30,15 +67,13 @@ impl fmt::Display for Issue {
         write!(f, "{}", match self {
             ParsingError => "Failed to parse".to_string(),
 
-            NameRedefined { curr_def: (name, pos), prev_def_pos } => {
-                format!("Name {}, defined {}, is redefined at {}",
-                        name,
-                        if let Some(prev_def_pos) = prev_def_pos {
-                            format!("at {}", prev_def_pos)
-                        } else {
-                            "in the standard library".to_string()
-                        },
-                        pos)
+            NameRedefined {
+                curr_def: (name, pos),
+                prev_def: DefInfoAndPos { pos_if_user_defined, .. }
+            } => {
+                format!("Name {}, defined at {}, was already defined {}",
+                        name, pos,
+                        def_pos_to_string(pos_if_user_defined))
             }
 
             VecSizeIsNotANumber { vec_def: (name, def_pos), size } => {
@@ -54,14 +89,12 @@ impl fmt::Display for Issue {
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone)]
 pub(crate) enum Arch {
-    x86_32,
     x86_64,
 }
 
 impl fmt::Display for Arch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Arch::x86_32 => write!(f, "x86-32"),
             Arch::x86_64 => write!(f, "x86-64"),
         }
     }
@@ -71,7 +104,6 @@ impl fmt::Display for Arch {
 #[derive(Copy, Clone, PartialEq)]
 pub(crate) enum PlatformName {
     Linux,
-    Bsd,
     Windows,
     MacOs,
 }
@@ -80,7 +112,6 @@ impl fmt::Display for PlatformName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PlatformName::Linux => write!(f, "Linux"),
-            PlatformName::Bsd => write!(f, "BSD"),
             PlatformName::Windows => write!(f, "Windows"),
             PlatformName::MacOs => write!(f, "macOS"),
         }
@@ -96,14 +127,8 @@ pub(crate) struct TargetPlatform {
 impl TargetPlatform {
     pub(crate) fn native() -> Self {
         TargetPlatform {
-            platform_name: if cfg!(any
-            (target_os = "freebsd",
-            target_os = "dragonfly",
-            target_os = "openbsd",
-            target_os = "netbsd")
-            ) {
-                PlatformName::Bsd
-            } else if cfg!(target_os = "linux") {
+            platform_name:
+            if cfg!(target_os = "linux") {
                 PlatformName::Linux
             } else if cfg!(target_os = "windows") {
                 PlatformName::Windows
@@ -116,12 +141,14 @@ impl TargetPlatform {
             },
             arch: {
                 if cfg!(target_pointer_width = "32") {
-                    Arch::x86_32
+                    eprintln!("32-bit platforms are not supported yet");
+                    unimplemented!()
                 } else if cfg!(target_pointer_width = "64") {
                     Arch::x86_64
                 } else {
                     let default_arch = TargetPlatform::default().arch;
-                    println!("Failed to determine the native architecture. Assuming it's {}", default_arch);
+                    println!("Failed to determine the native architecture. Assuming it's {}",
+                             default_arch);
                     default_arch
                 }
             },
@@ -176,31 +203,23 @@ pub(crate) fn get_reserved_symbols() -> ReservedSymbolsTable {
         ("while", ReservedName::ControlStatement(While)),
         ("break", ReservedName::ControlStatement(Break)),
         ("default", ReservedName::ControlStatement(Default)),
-        // ("for", SymbolType::Reserved::ControlStatement(For))),
     ].into_iter().map(|x| (x.0.to_string(), x.1)).collect()
 }
 
-#[derive(Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub(crate) enum NumberOfParameters {
     Exact(usize),
     AtLeast(usize),
 }
 
-#[derive(Eq, PartialEq, Hash)]
-pub(crate) enum VarOrVecOrFnInfo {
-    Variable,
-    Vector { size: usize },
-    Function { number_of_parameters: NumberOfParameters },
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub(crate) enum StdNameInfo {
+    Variable { ival: isize },
+    Function { num_of_params: NumberOfParameters },
 }
 
-#[derive(Eq, PartialEq, Hash)]
-pub(crate) struct StandardLibraryName {
-    pub(crate) name: String,
-    pub(crate) info: VarOrVecOrFnInfo,
-}
-
-pub(crate) fn get_standard_library_names() -> HashSet<StandardLibraryName> {
-    let mut std_lib_fns_with_exact_num_of_params = Vec::<(&str, usize)>::new();
+pub(crate) fn get_standard_library_names() -> HashMap<&'static str, StdNameInfo> {
+    let mut std_lib_fns_with_exact_num_of_params = Vec::<(&'static str, usize)>::new();
 
     std_lib_fns_with_exact_num_of_params.append(&mut (|| {
         vec![
@@ -244,37 +263,29 @@ pub(crate) fn get_standard_library_names() -> HashSet<StandardLibraryName> {
 
     let std_lib_fns_with_exact_num_of_params = std_lib_fns_with_exact_num_of_params
         .into_iter()
-        .map(|x| StandardLibraryName {
-            name: x.0.to_string(),
-            info: VarOrVecOrFnInfo::Function {
-                number_of_parameters: NumberOfParameters::Exact(x.1)
-            },
-        })
-        .collect::<HashSet<StandardLibraryName>>();
+        .map(|(name, num_of_params)|
+            (name,
+             StdNameInfo::Function {
+                 num_of_params: NumberOfParameters::Exact(num_of_params)
+             }))
+        .collect::<HashMap<&'static str, StdNameInfo>>();
 
-    let printf = StandardLibraryName {
-        name: "printf".to_string(),
-        info: VarOrVecOrFnInfo::Function { number_of_parameters: NumberOfParameters::AtLeast(1) },
-    };
-    let concat = StandardLibraryName {
-        name: "concat".to_string(),
-        info: VarOrVecOrFnInfo::Function {
-            number_of_parameters: NumberOfParameters::AtLeast(1)
-        },
-    };
+    let printf = ("printf", StdNameInfo::Function {
+        num_of_params: NumberOfParameters::AtLeast(1)
+    });
+    let concat = ("concat", StdNameInfo::Function {
+        num_of_params: NumberOfParameters::AtLeast(1),
+    });
     let mut std_lib_fns_with_variable_num_of_params = HashSet::new();
     std_lib_fns_with_variable_num_of_params.extend(vec![printf, concat].into_iter());
 
     let mut std_lib_fns = std_lib_fns_with_exact_num_of_params;
     std_lib_fns.extend(std_lib_fns_with_variable_num_of_params.into_iter());
 
-    let std_lib_vars: HashSet<StandardLibraryName> = vec!["wr.unit", "rd.unit"]
+    let std_lib_vars: HashMap<&'static str, StdNameInfo> = vec![("wr.unit", 1),
+                                                                ("rd.unit", 0)]
         .into_iter()
-        .map(|var_name|
-            StandardLibraryName {
-                name: var_name.to_string(),
-                info: VarOrVecOrFnInfo::Variable,
-            })
+        .map(|(var_name, ival)| (var_name, StdNameInfo::Variable { ival }))
         .collect();
     let mut res = std_lib_vars;
     res.extend(std_lib_fns);

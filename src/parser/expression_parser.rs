@@ -7,15 +7,12 @@ use crate::lexical_analyzer::token;
 use token::*;
 
 use crate::parser::ast::*;
-
 use crate::parser::{Parse, ParseExact, extract_bracketed_expression};
 
 #[derive(Debug)]
 enum BracketedExpression {
-    RoundBracketedExpression(RvalueNode),
-    // examples: (a), (a + b)
-    FunctionArgumentList(Vec<RvalueNode>),
-    // examples: (a, b, c), ()
+    RoundBracketedExpression(RvalueNode),  // examples: (a), (a + b)
+    FunctionArgumentList(Vec<RvalueNode>),  // examples: (a, b, c), ()
     SquareBracketedExpression(RvalueNode),
 }
 
@@ -36,7 +33,7 @@ impl Parse for BracketedExpression {
                 return Ok(BracketedExpression::RoundBracketedExpression(single_rvalue));
             }
 
-            let mut arguments = Vec::<RvalueNode>::new();
+            let mut arguments = vec![];
             let mut arg_starts_from: usize = 0;
 
             for (i, t) in input.into_iter().enumerate() {
@@ -235,7 +232,7 @@ impl Parse for RvalueNode {
                 }
             }
 
-            let mut toks_or_prim_or_br_exprs = Vec::<TokenOrPrimaryExpression>::new();
+            let mut toks_or_prim_or_br_exprs = vec![];
 
             let mut i: usize = 0;
             while let Some(t) = input.get(i) {
@@ -336,7 +333,7 @@ impl Parse for RvalueNode {
                 i += 1;
             }
 
-            let mut res = Vec::<TokenOrRvalueNode>::new();
+            let mut res = vec![];
             for x in toks_or_prim_or_br_exprs {
                 res.push(TokenOrRvalueNode::try_from(x)?);
             }
@@ -484,7 +481,7 @@ impl Parse for RvalueNode {
                 Err(())
             }
 
-            let mut res_reversed = Vec::<TokenOrRvalueNode>::new();
+            let mut res_reversed = vec![];
             while let Some(tok_or_rvalue) = input.pop() {
                 match &tok_or_rvalue {
                     TokenOrRvalueNode::Token(t) => {
@@ -654,9 +651,9 @@ impl Parse for RvalueNode {
                 }
             }
 
-            let mut bin_ops_and_positions = Vec::<(Operator, TokenPos)>::new();
-            let mut operands = Vec::<RvalueNode>::new();
-            let mut res = Vec::<TokenOrRvalueNode>::new();
+            let mut bin_ops_and_positions = vec![];
+            let mut operands = vec![];
+            let mut res = vec![];
 
             fn apply_last_bin_op(
                 ops_and_positions: &mut Vec<(Operator, TokenPos)>,

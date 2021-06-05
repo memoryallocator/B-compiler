@@ -9,15 +9,13 @@ mod config;
 mod intermediate_code_generator;
 mod machine_code_generator;
 
-fn process_command_line_arguments()
-    -> Result<(String, CompilerOptions), String> {
+fn process_command_line_arguments() -> Result<(String, CompilerOptions), String> {
     let args: Vec<String> = std::env::args().collect();
-
     if args.len() < 2 {
         return Err("not enough arguments".to_string());
     }
 
-    let mut target_platform = Option::<TargetPlatform>::None;
+    let mut target_platform = Option::None;
     let target_pattern = "--target=";
 
     let mut i: usize = 2;
@@ -38,9 +36,7 @@ fn process_command_line_arguments()
         }
         i += 1;
     }
-
     let target_platform = target_platform.unwrap_or(TargetPlatform::native());
-
     Ok((args[1].clone(), CompilerOptions { target_platform }))
 }
 
@@ -66,7 +62,8 @@ fn main() {
         reserved_symbols: &get_reserved_symbols(),
     };
 
-    let tokens = processor.run(&source_code);
+    let mut issues = vec![];
+    let tokens = processor.run(&source_code, &mut issues);
     let tokens = tokens.unwrap_or_else(
         |err| {
             eprintln!("Lexical analyzer returned an error: {}", err);
@@ -78,7 +75,7 @@ fn main() {
         source_code: &source_code,
     };
 
-    let (issues, ast_to_scopes_mapping) = processor.run(&tokens);
+    let ast_to_scopes_mapping = processor.run(&tokens, &mut issues);
     let scope_table = ast_to_scopes_mapping.unwrap_or_else(
         |()| {
             eprintln!("Cannot proceed");

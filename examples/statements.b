@@ -16,8 +16,10 @@ main() {
     i = 10;
 
     while (i--) {
-        j = f(i);
+        auto .while;
+        auto j; j = f(i);
         switch (j) {
+        auto .switch;
         case 1:
             x = 5;
             break;
@@ -26,12 +28,13 @@ main() {
             x = g(j);
         }
     labl:
-        if( j < 0 ){
+        if (j < 0) {
+            auto .if;
             xy = 3;
             break;
-            }
-        xy = j/2;
         }
+        xy = j/2;
+    }
     more:
-        printf("j = %d, xy = %d*n", j, xy);
+    printf("j = %d, xy = %d*n", j, xy);
 }

@@ -63,18 +63,11 @@ pub(crate) enum LeftOrRight {
     Right,
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
-pub(crate) enum ConstantType {
-    Octal,
-    Decimal,
-    Char,
-    String,
-}
-
 #[derive(PartialEq, Eq, Clone, Debug, Hash)]
-pub(crate) struct Constant {
-    pub(crate) constant_type: ConstantType,
-    pub(crate) value: String,
+pub(crate) enum Constant {
+    Number(u64),
+    Char(String),
+    String(String)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -198,10 +191,10 @@ pub(crate) enum WrappedToken {
     Constant(Constant),
 }
 
-#[derive(Eq, PartialEq, Copy, Clone, Debug, Hash)]
+#[derive(Eq, PartialEq, Copy, Clone, Debug, Hash, PartialOrd)]
 pub(crate) struct TokenPos {
-    line: usize,
-    column: usize,
+    pub(crate) line: usize,
+    pub(crate) column: usize,
 }
 
 impl From<(usize, usize)> for TokenPos {

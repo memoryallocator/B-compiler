@@ -1,24 +1,25 @@
 use std::*;
 
-use crate::parser::ast;
 use ast::*;
-use crate::lexical_analyzer::token;
 use token::TokenPos;
+
+use crate::lexical_analyzer::token;
+use crate::parser::ast;
 
 pub(crate) trait FlattenNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos>;
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum NameOrConstant {
     Name(String),
-    Constant(token::Constant),
+    Constant(Constant),
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct Ival {
-    pub(crate) value: NameOrConstant,
     pub(crate) pos: TokenPos,
+    pub(crate) value: NameOrConstant,
 }
 
 impl From<ast::Ival> for Ival {
@@ -36,32 +37,37 @@ impl From<ast::Ival> for Ival {
     }
 }
 
-#[derive(Clone)]
-pub(crate) enum FlatDefinition {
-    VarDef { name: String, initial_value: Option<Ival> },
-    VecDef {
-        name: String,
-        specified_size: Option<ConstantNode>,
-        initial_values: Vec<Ival>,
-    },
-    FnDef {
-        name: String,
-        parameters: Vec<(String, TokenPos)>,
-    },
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) enum FlatDefinitionNameInfo {
+    Variable { ival: Option<Ival> },
+    Vector { specified_size: Option<ConstantNode>, ivals: Vec<Ival> },
+    Function { params: Vec<(String, TokenPos)> },
 }
 
-#[derive(Clone)]
-pub(crate) enum FlatDeclarationType {
-    Auto(Option<ConstantNode>),
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct FlatDefinition {
+    pub(crate) name: String,
+    pub(crate) info: FlatDefinitionNameInfo,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) enum FlatDeclarationNameInfo {
+    Auto { size_if_vec: Option<ConstantNode> },
     Extern,
     Label,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct FlatDeclaration {
+    pub(crate) name: String,
+    pub(crate) info: FlatDeclarationNameInfo,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum FlatNode {
-    RestoreScope,
+    EndOfStmt { positions_away: usize },
     Def(FlatDefinition),
-    Decl(FlatDeclarationType, String),
+    Decl(FlatDeclaration),
     Compound,
     Rvalue(Rvalue),
     If(Rvalue),
@@ -74,7 +80,7 @@ pub(crate) enum FlatNode {
     Return(Option<Rvalue>),
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct FlatNodeAndPos {
     pub(crate) node: FlatNode,
     pub(crate) pos: TokenPos,
@@ -101,12 +107,14 @@ impl FlattenNode for DefinitionNode {
 impl FlattenNode for VariableDefinitionNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
         vec![FlatNodeAndPos {
-            node: FlatNode::Def(FlatDefinition::VarDef {
+            node: FlatNode::Def(FlatDefinition {
                 name: self.name,
-                initial_value: if let Some(ival) = self.initial_value {
-                    Some(Ival::from(ival))
-                } else {
-                    None
+                info: FlatDefinitionNameInfo::Variable {
+                    ival: if let Some(ival) = self.initial_value {
+                        Some(Ival::from(ival))
+                    } else {
+                        None
+                    }
                 },
             }),
             pos: self.position,
@@ -117,13 +125,15 @@ impl FlattenNode for VariableDefinitionNode {
 impl FlattenNode for VectorDefinitionNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
         vec![FlatNodeAndPos {
-            node: FlatNode::Def(FlatDefinition::VecDef {
+            node: FlatNode::Def(FlatDefinition {
                 name: self.name,
-                specified_size: self.specified_size,
-                initial_values: self.initial_values
-                    .into_iter()
-                    .map(|ival| Ival::from(ival))
-                    .collect(),
+                info: FlatDefinitionNameInfo::Vector {
+                    specified_size: self.specified_size,
+                    ivals: self.initial_values
+                        .into_iter()
+                        .map(|ival| Ival::from(ival))
+                        .collect(),
+                },
             }),
             pos: self.position,
         }]
@@ -133,9 +143,9 @@ impl FlattenNode for VectorDefinitionNode {
 impl FlattenNode for FunctionDefinitionNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
         let mut res = vec![FlatNodeAndPos {
-            node: FlatNode::Def(FlatDefinition::FnDef {
+            node: FlatNode::Def(FlatDefinition {
                 name: self.name,
-                parameters: self.parameters,
+                info: FlatDefinitionNameInfo::Function { params: self.parameters },
             }),
             pos: self.position,
         }];
@@ -144,17 +154,16 @@ impl FlattenNode for FunctionDefinitionNode {
     }
 }
 
-fn control_statement_require_end_marker(node: &Statement) -> bool {
-    use Statement::*;
-    match node {
-        Compound(_) | Switch(_) | If(_) | While(_) => true,
-        _ => false,
-    }
-}
-
 impl FlattenNode for StatementNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
-        let append_end_marker = control_statement_require_end_marker(&self.statement);
+        let append_end_marker = (|| {
+            use Statement::*;
+            if let Compound(_) | Switch(_) | If(_) | While(_) = self.statement.as_ref() {
+                true
+            } else {
+                false
+            }
+        })();
         let mut res = match *self.statement {
             Statement::NullStatement => vec![],
             Statement::Compound(comp_stmt) => comp_stmt.flatten_node(),
@@ -185,7 +194,7 @@ impl FlattenNode for StatementNode {
             Statement::Case(cs) => {
                 let mut res = vec![FlatNodeAndPos {
                     pos: self.position,
-                    node: FlatNode::Case(cs.constant),
+                    node: FlatNode::Case(cs.constant_if_not_default),
                 }];
                 res.append(&mut cs.next_statement.flatten_node());
                 res
@@ -234,7 +243,7 @@ impl FlattenNode for StatementNode {
 
         if append_end_marker {
             res.push(FlatNodeAndPos {
-                node: FlatNode::RestoreScope,
+                node: FlatNode::EndOfStmt { positions_away: res.len() },
                 pos: res.last().unwrap().pos,
             })
         }
@@ -281,7 +290,11 @@ impl FlattenNode for AutoDeclarationNode {
 impl FlattenNode for AutoDeclaration {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
         vec![FlatNodeAndPos {
-            node: FlatNode::Decl(FlatDeclarationType::Auto(self.vector_size), self.name),
+            node: FlatNode::Decl(
+                FlatDeclaration {
+                    info: FlatDeclarationNameInfo::Auto { size_if_vec: self.size_if_vector },
+                    name: self.name,
+                }),
             pos: self.position,
         }]
     }
@@ -292,7 +305,11 @@ impl FlattenNode for ExternDeclarationNode {
         let mut res = self.names
             .into_iter()
             .map(|(name, pos)| FlatNodeAndPos {
-                node: FlatNode::Decl(FlatDeclarationType::Extern, name),
+                node: FlatNode::Decl(
+                    FlatDeclaration {
+                        name,
+                        info: FlatDeclarationNameInfo::Extern,
+                    }),
                 pos,
             })
             .collect::<Vec<FlatNodeAndPos>>();
@@ -304,7 +321,10 @@ impl FlattenNode for ExternDeclarationNode {
 impl FlattenNode for LabelDeclarationNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
         let mut res = vec![FlatNodeAndPos {
-            node: FlatNode::Decl(FlatDeclarationType::Label, self.label_name),
+            node: FlatNode::Decl(FlatDeclaration {
+                name: self.label_name,
+                info: FlatDeclarationNameInfo::Label,
+            }),
             pos: self.position,
         }];
         res.append(&mut self.next_statement.flatten_node());

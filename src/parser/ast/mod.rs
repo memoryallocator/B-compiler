@@ -15,21 +15,21 @@ pub(crate) enum Ival {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub(crate) struct ConstantNode {
     pub(crate) position: TokenPos,
-    pub(crate) constant: token::Constant,
+    pub(crate) constant: Constant,
 }
 
 impl TryFrom<&Token> for ConstantNode {
     type Error = ();
 
     fn try_from(t: &Token) -> Result<Self, Self::Error> {
-        return if let WrappedToken::Constant(constant) = &t.token {
+        if let WrappedToken::Constant(constant) = &t.token {
             Ok(ConstantNode {
                 position: t.pos,
                 constant: constant.clone(),
             })
         } else {
             Err(())
-        };
+        }
     }
 }
 
@@ -60,7 +60,7 @@ pub(crate) struct FunctionDefinitionNode {
 pub(crate) struct AutoDeclaration {
     pub(crate) position: TokenPos,
     pub(crate) name: String,
-    pub(crate) vector_size: Option<ConstantNode>,
+    pub(crate) size_if_vector: Option<ConstantNode>,
 }
 
 #[derive(Debug)]
@@ -84,14 +84,14 @@ pub(crate) struct LabelDeclarationNode {
     pub(crate) next_statement: StatementNode,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum Lvalue {
     Name(String),
     DerefRvalue(RvalueNode),
     Indexing { vector: RvalueNode, index: RvalueNode },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct LvalueNode {
     pub(crate) position: TokenPos,
     pub(crate) lvalue: Lvalue,
@@ -109,20 +109,20 @@ impl TryFrom<&RvalueNode> for LvalueNode {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub(crate) enum IncDecType {
     Prefix,
     Postfix,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct IncDecNode {
     pub(crate) inc_or_dec: IncDec,
     pub(crate) inc_dec_type: IncDecType,
     pub(crate) lvalue: LvalueNode,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum Unary {
     Plus,
     Minus,
@@ -130,13 +130,13 @@ pub(crate) enum Unary {
     Complement,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct FunctionCallNode {
     pub(crate) fn_name: RvalueNode,
     pub(crate) arguments: Vec<RvalueNode>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum Rvalue {
     Constant(ConstantNode),
     Lvalue(LvalueNode),
@@ -155,7 +155,7 @@ pub(crate) enum Rvalue {
     FunctionCall(FunctionCallNode),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct RvalueNode {
     pub(crate) position: TokenPos,
     pub(crate) rvalue: Box<Rvalue>,
@@ -256,7 +256,7 @@ pub(crate) struct SwitchNode {
 
 #[derive(Debug)]
 pub(crate) struct CaseNode {
-    pub(crate) constant: Option<ConstantNode>,
+    pub(crate) constant_if_not_default: Option<ConstantNode>,
     pub(crate) next_statement: StatementNode,
 }
 

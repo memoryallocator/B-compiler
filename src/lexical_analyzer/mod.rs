@@ -108,9 +108,9 @@ fn parse_operator<'a, I>(op: I) -> Option<(Operator, usize)>
 }
 
 impl LexicalAnalyzer<'_> {
-    fn tokenize(&self, source_code: &str) -> Result<Vec<Token>, String> {
-        let mut res = Vec::<Token>::new();
-        let mut buffer = Cell::<String>::default();
+    fn tokenize(&self, source_code: &str, issues: &mut Vec<Issue>) -> Result<Vec<Token>, String> {
+        let mut res = vec![];
+        let mut buffer = Cell::default();
         let mut line_no: usize = 1;
         let mut i: usize = 0;
         let mut curr_line_started_at: usize = 0;
@@ -143,7 +143,7 @@ impl LexicalAnalyzer<'_> {
         let mut currently_reading: Option<(CommentOrCharOrString, TokenPos)> = None;
 
         fn read_name(s: &str) -> Option<String> {
-            let first_symbol = s.chars().nth(0)?;
+            let first_symbol = s.chars().next()?;
             if first_symbol.is_ascii_digit() {
                 return None;
             }
@@ -175,24 +175,18 @@ impl LexicalAnalyzer<'_> {
 
                 if source_code[i..].starts_with(closing_literal) {
                     if *curr_reading != CommentOrCharOrString::Comment {
-                        let constant_type =
-                            match curr_reading {
-                                CommentOrCharOrString::Char =>
-                                    ConstantType::Char,
-
-                                CommentOrCharOrString::String =>
-                                    ConstantType::String,
-
-                                _ => unreachable!(),
-                            };
-
                         res.push(Token {
-                            token: WrappedToken::Constant(Constant {
-                                constant_type,
-                                value: buffer.take(),
-                            }),
+                            token: WrappedToken::Constant(
+                                match curr_reading {
+                                    CommentOrCharOrString::Char =>
+                                        Constant::Char(buffer.take()),
+
+                                    CommentOrCharOrString::String =>
+                                        Constant::String(buffer.take()),
+                                    _ => unreachable!(),
+                                }),
                             pos,
-                        })
+                        });
                     }
 
                     currently_reading = None;
@@ -211,11 +205,9 @@ impl LexicalAnalyzer<'_> {
                             break;
                         }
                     }
-
                     if esc_seq_matched {
                         continue;
                     }
-
                     buffer.get_mut().push(curr_char);
                 }
             } else {
@@ -229,14 +221,11 @@ impl LexicalAnalyzer<'_> {
                         break;
                     }
                 }
-
                 if currently_reading.is_some() {
                     continue;
                 }
-
                 if let Some(name) = read_name(&source_code[i..]) {
                     let name_len = name.len();
-
                     if name_len > 0 {
                         if let Some(
                             keyword
@@ -251,12 +240,10 @@ impl LexicalAnalyzer<'_> {
                                 pos: token_pos,
                             });
                         }
-
                         i += name_len;
                         continue;
                     }
                 }
-
                 match curr_char {
                     ' ' => (),
                     ',' => res.push(Token {
@@ -271,46 +258,42 @@ impl LexicalAnalyzer<'_> {
                         token: WrappedToken::Colon,
                         pos: token_pos,
                     }),
-
                     '0'..='9' => {
                         let number_as_str: String = source_code[i..].chars()
                             .into_iter()
                             .take_while(|c| c.is_ascii_digit())
                             .collect();
-
                         let number_len = number_as_str.len();
 
+                        let radix =
+                            if curr_char == '0' {
+                                8
+                            } else {
+                                10
+                            };
+                        let val = u64::from_str_radix(&number_as_str, radix)
+                            .unwrap_or_else(|_| {
+                                issues.push(Issue::IntegerLiteralTooLarge(token_pos));
+                                0
+                            });
                         res.push(
                             Token {
-                                token: WrappedToken::Constant(
-                                    Constant {
-                                        constant_type: if curr_char == '0' {
-                                            ConstantType::Octal
-                                        } else {
-                                            ConstantType::Decimal
-                                        },
-                                        value: number_as_str,
-                                    }
-                                ),
+                                token: WrappedToken::Constant(Constant::Number(val)),
                                 pos: token_pos,
                             });
-
                         i += number_len;
                         continue;
                     }
-
                     '?' => res.push(Token {
                         token: WrappedToken::QuestionMark,
                         pos: token_pos,
                     }),
-
                     '[' | ']' | '(' | ')' | '{' | '}' =>
                         res.push(Token {
                             token: WrappedToken::Bracket(
                                 Bracket::from_char_unchecked(curr_char)),
                             pos: token_pos,
                         }),
-
                     '\r' => (), // for Windows
                     _ =>
                         if let Some(
@@ -343,8 +326,12 @@ impl LexicalAnalyzer<'_> {
         Ok(res)
     }
 
-    pub(crate) fn run(&self, source_code: &str) -> Result<Vec<Token>, String> {
-        Ok(self.tokenize(&source_code)?)
+    pub(crate) fn run(
+        &self,
+        source_code: &str,
+        issues: &mut Vec<Issue>,
+    ) -> Result<Vec<Token>, String> {
+        Ok(self.tokenize(&source_code, issues)?)
     }
 }
 
