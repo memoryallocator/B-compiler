@@ -1300,11 +1300,6 @@ impl Parser<'_> {
 
         let analyzer = Analyzer { source_code: self.source_code };
         let res = prog_node.unwrap().flatten_node();
-        let analysis_result = analyzer.run(res, issues);
-        return if let Ok(nodes_to_scopes) = analysis_result.1 {
-            Ok(nodes_to_scopes)
-        } else {
-            Err(())
-        };
+        Ok(analyzer.run(res, issues))
     }
 }

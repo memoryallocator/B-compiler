@@ -7,9 +7,9 @@ use crate::lexical_analyzer::token;
 use token::{TokenPos, Constant};
 
 use crate::config::*;
-use crate::parser::ast::Rvalue;
-use crate::parser::ast::flat_ast::*;
-use crate::parser::FlatAst;
+use crate::parser;
+use parser::ast::flat_ast::*;
+use parser::FlatAst;
 
 #[derive(Debug, Clone)]
 enum ProcessedDeclInfo {
@@ -48,6 +48,7 @@ pub(crate) struct DeclInfoAndPos {
 type LocalScope = HashMap<String, DeclInfoAndPos>;
 type GlobalDefinitions = HashMap<String, DefInfoAndPos>;
 
+#[derive(Debug)]
 pub(crate) struct ScopeTable {
     global: GlobalDefinitions,
     local: Vec<(FlatNodeAndPos, LocalScope)>,
@@ -290,8 +291,103 @@ impl Analyzer<'_> {
         (global_scope, fn_nodes_indexes_ranges)
     }
 
-    fn inspect_rvalue(rvalue: &Rvalue) {
-        todo!()
+    fn process_rvalue(
+        rv: &parser::ast::Rvalue,
+        local_scope: &mut LocalScope,
+        global_scope: &GlobalDefinitions,
+        issues: &mut Vec<Issue>,
+    ) {
+        use parser::ast;
+        use ast::*;
+        use ast::Rvalue::*;
+
+        fn process_lvalue<'a>(lv: &'a LvalueNode,
+                              local_scope: &mut LocalScope,
+                              _global_scope: &GlobalDefinitions,
+                              issues: &mut Vec<Issue>,
+        ) -> Vec<&'a RvalueNode> {
+            match &lv.lvalue {
+                ast::Lvalue::Name(name) => {
+                    if !local_scope.contains_key(name.as_str()) {
+                        // TODO: suggestions
+                        issues.push(Issue::NameNotDefined {
+                            name: name.clone(),
+                            pos: lv.position,
+                        })
+                    }
+                    vec![]
+                }
+                ast::Lvalue::DerefRvalue(rv) => {
+                    vec![rv]
+                }
+                ast::Lvalue::Indexing { vector, index } => {
+                    vec![vector, index]
+                }
+            }
+        }
+
+        let rvalues_to_process =
+            match rv {
+                Constant(_) => vec![],
+                Lvalue(lv) => {
+                    process_lvalue(&lv, local_scope, global_scope, issues)
+                }
+                Assign { lhs, rhs, .. } => {
+                    let mut rvs_to_pr = process_lvalue(&lhs, local_scope, global_scope, issues);
+                    rvs_to_pr.push(rhs);
+                    rvs_to_pr
+                }
+                IncDec(node) => {
+                    process_lvalue(&node.lvalue, local_scope, global_scope, issues)
+                }
+
+                Unary(_, rv) => vec![rv],
+                TakeAddress(lv) => {
+                    process_lvalue(&lv, local_scope, global_scope, issues)
+                }
+                Binary { lhs, rhs, .. } => vec![lhs, rhs],
+                ConditionalExpression { condition, on_true, on_false, .. } => {
+                    vec![condition, on_true, on_false]
+                        .into_iter()
+                        .collect()
+                }
+
+                BracketedExpression(expr) => vec![expr],
+                FunctionCall(fn_call) => {
+                    let mut rvs_to_pr = vec![];
+                    if let Rvalue::Lvalue(
+                        LvalueNode {
+                            position,
+                            lvalue: ast::Lvalue::Name(name),
+                        }
+                    ) = &*fn_call.fn_name.rvalue {
+                        if !local_scope.contains_key(name.as_str()) {
+                            if global_scope.contains_key(name.as_str()) {
+                                local_scope.insert(name.clone(),
+                                                   DeclInfoAndPos {
+                                                       pos: *position,
+                                                       info: ProcessedDeclInfo::AssumedExternFnCall,
+                                                   });
+                            } else {
+                                issues.push(Issue::NameNotDefined {
+                                    name: name.clone(),
+                                    pos: *position,
+                                })
+                            }
+                        }
+                    } else {
+                        rvs_to_pr.push(&fn_call.fn_name)
+                    }
+                    rvs_to_pr.append(
+                        &mut fn_call.arguments
+                            .iter()
+                            .collect());
+                    rvs_to_pr
+                }
+            };
+        for x in rvalues_to_process {
+            Analyzer::process_rvalue(&*x.rvalue, local_scope, global_scope, issues)
+        }
     }
 
     fn validate_function(
@@ -377,20 +473,20 @@ impl Analyzer<'_> {
                     scope_stack.push(local_scope.clone())
                 }
                 FlatNode::Rvalue(rv) => {
-                    Analyzer::inspect_rvalue(rv);
+                    Analyzer::process_rvalue(rv, local_scope, global_scope, issues);
                 }
                 FlatNode::If(cond) => {
-                    Analyzer::inspect_rvalue(cond);
+                    Analyzer::process_rvalue(cond, local_scope, global_scope, issues);
                 }
                 FlatNode::While(cond) => {
-                    Analyzer::inspect_rvalue(cond);
+                    Analyzer::process_rvalue(cond, local_scope, global_scope, issues);
                     breakable_stmt_stack.push(node.pos);
                 }
                 FlatNode::Goto(goto) => {
-                    Analyzer::inspect_rvalue(goto);
+                    Analyzer::process_rvalue(goto, local_scope, global_scope, issues);
                 }
                 FlatNode::Switch(var) => {
-                    Analyzer::inspect_rvalue(var);
+                    Analyzer::process_rvalue(var, local_scope, global_scope, issues);
                     cases_stack.push(HashSet::new());
                 }
                 FlatNode::Case(case_val) => {
@@ -410,12 +506,12 @@ impl Analyzer<'_> {
                 }
                 FlatNode::Return(ret) => {
                     if let Some(val) = ret {
-                        Analyzer::inspect_rvalue(val)
+                        Analyzer::process_rvalue(val, local_scope, global_scope, issues);
                     }
                 }
                 FlatNode::Def(
                     FlatDefinition {
-                        name: fn_name, info: FlatDefinitionNameInfo::Function { params }
+                        info: FlatDefinitionNameInfo::Function { params }, ..
                     }
                 ) => {
                     for (param_name, param_pos) in params {
@@ -440,11 +536,7 @@ impl Analyzer<'_> {
         res
     }
 
-    pub(crate) fn run(
-        &self,
-        program: FlatAst,
-        issues: &mut Vec<Issue>,
-    ) -> (Vec<Issue>, Result<ScopeTable, ()>) {
+    pub(crate) fn run(&self, program: FlatAst, issues: &mut Vec<Issue>) -> ScopeTable {
         let (global_scope,
             fn_nodes_indexes_ranges) = Analyzer::get_global_scope_and_fns_ranges(&program,
                                                                                  issues);
@@ -456,6 +548,11 @@ impl Analyzer<'_> {
                     local_scopes[idx] = local_scope
                 });
         }
-        todo!()
+        ScopeTable {
+            global: global_scope,
+            local: program.into_iter()
+                .zip(local_scopes.into_iter())
+                .collect(),
+        }
     }
 }

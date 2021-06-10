@@ -31,7 +31,7 @@ convert(s,v) {
 
     auto m,i,j,c,sign;
 
-    i = O; /* vector index */
+    i = 0; /* vector index */
     j =-1; /* character index */
 
     init: /* initialize to convert an integer */
@@ -40,7 +40,7 @@ convert(s,v) {
 
     loop: /* convert an integer */
 
-        switch (C = char(s,++j)){
+        switch (c = char(s,++j)){
 
         case '-':
             if(sign) goto syntax;

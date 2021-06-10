@@ -82,6 +82,9 @@ fn main() {
             process::exit(1);
         });
 
+    for issue in issues {
+        todo!()
+    }
     let processor = intermediate_code_generator::IntermediateCodeGenerator {
         compiler_options,
     };

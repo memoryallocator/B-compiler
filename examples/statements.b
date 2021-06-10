@@ -27,7 +27,7 @@ main() {
         case 3:
             x = g(j);
         }
-    labl:
+labl:
         if (j < 0) {
             auto .if;
             xy = 3;
@@ -35,6 +35,6 @@ main() {
         }
         xy = j/2;
     }
-    more:
+more:
     printf("j = %d, xy = %d*n", j, xy);
 }
