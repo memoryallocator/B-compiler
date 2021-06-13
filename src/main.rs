@@ -3,7 +3,7 @@ use process;
 
 use crate::config::*;
 
-mod lexical_analyzer;
+mod tokenizer;
 mod parser;
 mod config;
 mod intermediate_code_generator;
@@ -15,17 +15,17 @@ fn process_command_line_arguments() -> Result<(String, CompilerOptions), String>
         return Err("not enough arguments".to_string());
     }
 
-    let mut target_platform = Option::None;
+    let mut options = CompilerOptions::default();
     let target_pattern = "--target=";
 
     let mut i: usize = 2;
-    while i < args.len() {
+    while let Some(option_str) = args.get(i) {
         let option_str = &args[i];
         if option_str.starts_with(target_pattern) {
             let target = &args[i][target_pattern.len()..];
             match target {
                 "native" => {
-                    target_platform = Some(TargetPlatform::native());
+                    options.target_platform = TargetPlatform::native();
                 }
                 _ => {
                     return Err(format!("unknown target: {}", target));
@@ -36,8 +36,7 @@ fn process_command_line_arguments() -> Result<(String, CompilerOptions), String>
         }
         i += 1;
     }
-    let target_platform = target_platform.unwrap_or(TargetPlatform::native());
-    Ok((args[1].clone(), CompilerOptions { target_platform }))
+    Ok((args[1].clone(), options))
 }
 
 fn main() {
@@ -57,9 +56,10 @@ fn main() {
         process::exit(1)
     }
 
-    let processor = lexical_analyzer::LexicalAnalyzer {
+    let processor = tokenizer::Tokenizer {
         escape_sequences: &get_escape_sequences(),
         reserved_symbols: &get_reserved_symbols(),
+        compiler_options,
     };
 
     let mut issues = vec![];
@@ -82,18 +82,39 @@ fn main() {
             process::exit(1);
         });
 
+    let mut at_least_1_error = false;
     for issue in issues {
-        todo!()
+        use Issue::*;
+        let error = match issue {
+            BracketNotOpened(_) | BracketNotClosed(_)
+            | EmptyTokenStream | ParsingError
+            | NameNotDefined { .. } | NameRedefined { .. } | NameRedeclared { .. }
+            | VecSizeIsNotANumber { .. } | LiteralTooLong(_)
+            | UnexpectedKeyword(_) | CaseEncounteredTwice(_)
+            | NameHasNoRvalue(_, _) | ExternSymbolNotFound { .. }
+            | NoMainFn => true,
+            VecWithNoSizeAndInits(_, _) | VecTooManyIvals { .. }
+            | DeclShadowsGlobalDef { .. } | UnnecessaryImport { .. }
+            | DeclShadowsFnParameter { .. } | DeclShadowsPrevious { .. } => false,
+        };
+        eprintln!("{}: {}", if error { "error" } else { "warning" }, issue);
+        at_least_1_error |= error;
     }
-    let processor = intermediate_code_generator::IntermediateCodeGenerator {
-        compiler_options,
-    };
-    let intermediate_code = processor.run(&scope_table);
+    if at_least_1_error {
+        println!("There were more than 0 errors. Terminating");
+        process::exit(1);
+    }
 
-    let processor = machine_code_generator::MachineCodeGenerator {
-        compiler_options,
-    };
-    let res = processor.run(intermediate_code);
+    let mut processor
+        = intermediate_code_generator::IntermediateCodeGenerator::new(compiler_options,
+                                                                      &scope_table.global);
+    let (intermediate_code, pooled_strings) = processor.run(&scope_table);
+    dbg!(&intermediate_code);
+
+    let processor = machine_code_generator::MachineCodeGenerator::new(compiler_options,
+                                                                      intermediate_code,
+                                                                      pooled_strings);
+    let res = processor.run();
 
     println!("{}", &res);
 }

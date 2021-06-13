@@ -7,9 +7,10 @@ use token::*;
 
 pub mod token;
 
-pub(crate) struct LexicalAnalyzer<'a> {
+pub(crate) struct Tokenizer<'a> {
     pub(crate) escape_sequences: &'a HashMap<String, String>,
     pub(crate) reserved_symbols: &'a ReservedSymbolsTable,
+    pub(crate) compiler_options: CompilerOptions,
 }
 
 fn parse_assign_binary_operator<'a, I>(op: I) -> Option<(RichBinaryOperation, usize)>
@@ -56,7 +57,7 @@ fn parse_operator<'a, I>(op: I) -> Option<(Operator, usize)>
     use BinaryOperation::*;
     use BinaryRelation::*;
     use RichBinaryOperation::*;
-    use token::IncDec::*;
+    use token::IncOrDec::*;
     use token::Assign as AssignStruct;
 
     let s: Vec<char> = op.take(3).collect();
@@ -107,7 +108,7 @@ fn parse_operator<'a, I>(op: I) -> Option<(Operator, usize)>
     );
 }
 
-impl LexicalAnalyzer<'_> {
+impl Tokenizer<'_> {
     fn tokenize(&self, source_code: &str, issues: &mut Vec<Issue>) -> Result<Vec<Token>, String> {
         let mut res = vec![];
         let mut buffer = Cell::default();
@@ -178,11 +179,21 @@ impl LexicalAnalyzer<'_> {
                         res.push(Token {
                             token: WrappedToken::Constant(
                                 match curr_reading {
-                                    CommentOrCharOrString::Char =>
-                                        Constant::Char(buffer.take()),
-
                                     CommentOrCharOrString::String =>
                                         Constant::String(buffer.take()),
+
+                                    CommentOrCharOrString::Char => {
+                                        let char = buffer.take();
+                                        if char.len() > self.compiler_options
+                                            .target_platform.arch.ptr_size() as usize {
+                                            issues.push(Issue::LiteralTooLong(pos))
+                                        }
+                                        let mut char_as_u64: u64 = 0;
+                                        for (i, char) in char.chars().rev().enumerate() {
+                                            char_as_u64 |= (char as u64) << (i * 8);
+                                        }
+                                        Constant::Number(char_as_u64)
+                                    }
                                     _ => unreachable!(),
                                 }),
                             pos,
@@ -273,7 +284,7 @@ impl LexicalAnalyzer<'_> {
                             };
                         let val = u64::from_str_radix(&number_as_str, radix)
                             .unwrap_or_else(|_| {
-                                issues.push(Issue::IntegerLiteralTooLarge(token_pos));
+                                issues.push(Issue::LiteralTooLong(token_pos));
                                 0
                             });
                         res.push(
@@ -354,7 +365,7 @@ mod tests {
     ) -> Result<(), String> {
         let inp = inp.as_ref();
         let exp_out = exp_out.as_ref();
-        let mut la = LexicalAnalyzer {
+        let mut la = Tokenizer {
             compiler_options,
             second_symbol_of_escape_sequence_to_character_mapping,
             reserved_symbols: keywords,
@@ -397,7 +408,7 @@ mod tests {
         let co = CompilerOptions::default();
         let esm = get_second_symbol_of_escape_sequence_to_character_mapping();
         let kw = get_reserved_symbols();
-        let la = LexicalAnalyzer {
+        let la = Tokenizer {
             compiler_options: &co,
             second_symbol_of_escape_sequence_to_character_mapping: &esm,
             reserved_symbols: &kw,

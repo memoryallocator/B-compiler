@@ -3,7 +3,7 @@ use collections::VecDeque;
 use convert::TryFrom;
 use cell::Cell;
 
-use crate::lexical_analyzer::token;
+use crate::tokenizer::token;
 use token::*;
 
 use crate::parser::ast::*;
@@ -880,15 +880,7 @@ impl Parse for RvalueNode {
                                 if let Some(
                                     TokenOrRvalueNode::RvalueNode(condition)
                                 ) = input.pop() {
-                                    let condition =
-                                        if let Some(
-                                            truth_value
-                                        ) = condition.try_to_truth_value() {
-                                            truth_value
-                                        } else {
-                                            condition
-                                        };
-
+                                    let condition = condition.into_truth_value();
                                     input.push(TokenOrRvalueNode::RvalueNode(
                                         RvalueNode {
                                             position: t.pos,
@@ -930,7 +922,6 @@ impl Parse for RvalueNode {
         }
 
         let res = parse_conditional_expressions_and_assignments(res)?;
-        // dbg!(&res);
         Ok((res, input.len()))
     }
 }

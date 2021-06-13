@@ -3,7 +3,7 @@ pub(crate) mod flat_ast;
 use std::*;
 use convert::TryFrom;
 
-use crate::lexical_analyzer::token;
+use crate::tokenizer::token;
 use token::*;
 
 #[derive(Debug)]
@@ -117,12 +117,12 @@ pub(crate) enum IncDecType {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct IncDecNode {
-    pub(crate) inc_or_dec: IncDec,
+    pub(crate) inc_or_dec: IncOrDec,
     pub(crate) inc_dec_type: IncDecType,
     pub(crate) lvalue: LvalueNode,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub(crate) enum Unary {
     Plus,
     Minus,
@@ -162,89 +162,18 @@ pub(crate) struct RvalueNode {
 }
 
 impl RvalueNode {
-    pub(crate) fn try_to_truth_value(&self) -> Option<Self> {
-        return Some(match &*self.rvalue {
-            Rvalue::Constant(_) => self.clone(),
-            Rvalue::Lvalue(lvalue_node) =>
-                if let Lvalue::Name(_) = lvalue_node.lvalue {
-                    self.clone()
-                } else {
-                    return None;
-                },
-            Rvalue::Binary {
-                lhs,
-                bin_op,
-                rhs
-            } => {
-                let lhs = lhs.try_to_truth_value()?;
-                let rhs = rhs.try_to_truth_value()?;
-
-                match bin_op {
-                    RichBinaryOperation::LogicalAnd => self.clone(),
-                    RichBinaryOperation::RegularBinary(BinaryOperation::Or) => {
-                        RvalueNode {
-                            position: self.position,
-                            rvalue: Box::new(Rvalue::Binary {
-                                lhs,
-                                bin_op: *bin_op,
-                                rhs,
-                            }),
-                        }
-                    }
-
-                    RichBinaryOperation::BitwiseAnd => {
-                        RvalueNode {
-                            position: self.position,
-                            rvalue: Box::new(Rvalue::Binary {
-                                lhs,
-                                bin_op: RichBinaryOperation::LogicalAnd,
-                                rhs,
-                            }),
-                        }
-                    }
-
-                    _ => return None,
-                }
-            }
-
-            Rvalue::ConditionalExpression {
-                condition,
-                on_true,
-                on_false,
-                colon_pos,
-            } => {
-                let condition = condition.try_to_truth_value()?;
-                let on_true = on_true.clone();
-                let on_false = on_false.clone();
-
-                RvalueNode {
-                    position: self.position,
-                    rvalue: Box::new(Rvalue::ConditionalExpression {
-                        condition,
-                        on_true,
-                        on_false,
-                        colon_pos: *colon_pos,
-                    }),
-                }
-            }
-
-            Rvalue::BracketedExpression(br_expr) =>
-                RvalueNode {
-                    position: self.position,
-                    rvalue: Box::new(Rvalue::BracketedExpression(
-                        br_expr.try_to_truth_value()?
-                    )),
-                },
-
-            Rvalue::Unary(Unary::LogicalNot, rvalue_node) => {
-                RvalueNode {
-                    position: self.position,
-                    rvalue: Box::new(Rvalue::Unary(Unary::LogicalNot,
-                                                   rvalue_node.try_to_truth_value()?)),
-                }
-            }
-            _ => return None,
-        });
+    pub(crate) fn into_truth_value(self) -> Self {
+        if let Rvalue::Binary {
+            bin_op: RichBinaryOperation::BitwiseAnd, lhs, rhs
+        } = *self.rvalue {
+            return Self {
+                position: self.position,
+                rvalue: Box::new(
+                    Rvalue::Binary { lhs, bin_op: RichBinaryOperation::LogicalAnd, rhs }
+                ),
+            };
+        };
+        self
     }
 }
 

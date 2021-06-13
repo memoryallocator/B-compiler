@@ -11,12 +11,12 @@ use crate::parser::ast::*;
 use flat_ast::{FlatNodeAndPos, FlattenNode};
 
 use crate::config::*;
-use crate::lexical_analyzer::token;
+use crate::tokenizer::token;
 use token::*;
 
 pub mod ast;
 mod expression_parser;
-mod analyzer;
+pub(crate) mod analyzer;
 
 pub(crate) type FlatAst = Vec<FlatNodeAndPos>;
 
@@ -216,7 +216,7 @@ fn parse_name_list(
 
     let mut res = MultiMap::new();
     loop {
-        let name_idx = res.len() * 2;
+        let name_idx = res.key_count() * 2;
         let name_pos;
         let name;
         let comma_idx;
@@ -234,7 +234,7 @@ fn parse_name_list(
         if res.contains_key(&name) && !allow_duplicates {
             return Err(());  // duplicate found
         }
-        res.insert(name, (res.len(), name_pos));
+        res.insert(name, (res.key_count(), name_pos));
 
         match tokens.get(comma_idx) {
             Some(Token { token: WrappedToken::Comma, .. }) => (),  // OK, matched "name ,"
@@ -280,7 +280,6 @@ impl Parse for FunctionDefinitionNode {
                 ), ..
             }] => {
                 let mut toks_consumed: usize = 2;
-
                 let left_br_idx = 1;
                 let right_bracket_index
                     = get_right_bracket_index(input, left_br_idx).ok_or(())?;
@@ -299,7 +298,6 @@ impl Parse for FunctionDefinitionNode {
                 ) = StatementNode::parse(&input[toks_consumed..]) {
                     let name = name.clone();
                     toks_consumed += adv;
-
                     Ok((
                         FunctionDefinitionNode {
                             position: name_pos.clone(),
@@ -555,18 +553,14 @@ fn extract_bracketed_rvalue(
     bracket_type: BracketType,
 ) -> Result<(RvalueNode, usize), ()> {
     return if let Some(
-        Token {
-            token: WrappedToken::Bracket(br), ..
-        }) = tokens.first() {
+        Token { token: WrappedToken::Bracket(br), .. }) = tokens.first() {
         if br.bracket_type != bracket_type {
             return Err(());
         }
-
         let br_expr = extract_bracketed_expression(tokens)?;
         if br_expr.is_empty() {
             return Err(());
         }
-
         Ok((RvalueNode::parse_exact(br_expr)?, 1 + br_expr.len() + 1))
     } else {
         Err(())
@@ -634,21 +628,22 @@ impl Parse for CaseNode {
             match input[0].token {
                 WrappedToken::ReservedName(ReservedName::ControlStatement(Case)) => {
                     colon_pos = 2;
-                    Some(ConstantNode::parse_exact(&input[1..=1])?)
+                    let constant = ConstantNode::parse_exact(&input[1..=1])?;
+                    if let ConstantNode { constant: Constant::Number(_), .. } = constant {
+                        Some(constant)
+                    } else {
+                        return Err(());
+                    }
                 }
-
                 WrappedToken::ReservedName(ReservedName::ControlStatement(Default)) => {
                     colon_pos = 1;
                     None
                 }
-
                 _ => return Err(()),
             };
-
         if input[colon_pos].token != WrappedToken::Colon {
             return Err(());
         }
-
         let next_stmt_idx = colon_pos + 1;
         let (next_stmt, adv) = StatementNode::parse(&input[next_stmt_idx..])?;
         let toks_consumed = next_stmt_idx + adv;
@@ -677,14 +672,7 @@ impl Parse for IfNode {
         let (condition, adv) = extract_bracketed_rvalue(&input[1..],
                                                         Round)?;
         let mut toks_consumed = 1 + adv;
-
-        let condition =
-            if let Some(truth_value) = condition.try_to_truth_value() {
-                truth_value
-            } else {
-                condition
-            };
-
+        let condition = condition.into_truth_value();
         let (body, adv) = StatementNode::parse(&input[toks_consumed..])?;
         toks_consumed += adv;
 
@@ -722,10 +710,8 @@ impl Parse for WhileNode {
         if input.len() < 5 {  // while ( x ) ;
             return Err(());
         }
-
         use ControlStatementIdentifier::While;
         use BracketType::Round;
-
         if input[0].token != WrappedToken::ReservedName(ReservedName::ControlStatement(While)) {
             return Err(());
         }
@@ -733,25 +719,15 @@ impl Parse for WhileNode {
         let (condition, adv) = extract_bracketed_rvalue(&input[1..],
                                                         Round)?;
         let mut toks_consumed = 1 + adv;
-
-        let condition =
-            if let Some(truth_value) = condition.try_to_truth_value() {
-                truth_value
-            } else {
-                condition
-            };
+        let condition = condition.into_truth_value();
 
         if input.len() <= toks_consumed {
             return Err(());
         }
-
         let (body, adv) = StatementNode::parse(&input[toks_consumed..])?;
         toks_consumed += adv;
 
-        return Ok((WhileNode {
-            condition,
-            body,
-        }, toks_consumed));
+        return Ok((WhileNode { condition, body }, toks_consumed));
     }
 }
 
@@ -778,7 +754,6 @@ pub(crate) fn extract_bracketed_expression(tokens: &[Token]) -> Result<&[Token],
     } = tokens.get(0).ok_or(())? {
         let right_br_idx
             = get_right_bracket_index(tokens, 0).ok_or(())?;
-
         Ok(&tokens[1..right_br_idx])
     } else {
         Err(())
@@ -791,9 +766,7 @@ impl Parse for CompoundStatementNode {
         if input.len() < 2 {
             return Err(());
         }
-
         use BracketType::Curly;
-
         if let WrappedToken::Bracket(
             Bracket {
                 left_or_right: LeftOrRight::Left,
@@ -803,7 +776,6 @@ impl Parse for CompoundStatementNode {
         } else {
             return Err(());
         }
-
         let br_expr = extract_bracketed_expression(input)?;
         let body_len = br_expr.len();
         let mut statement_list = vec![];
@@ -958,7 +930,6 @@ impl Parse for Statement {
         if input.is_empty() {
             return Err(());
         }
-
         match &input[0].token {
             WrappedToken::ReservedName(res_name) => {
                 match res_name {
@@ -1084,19 +1055,16 @@ impl Parse for DefinitionNode {
         ) = VariableDefinitionNode::parse(input) {
             return Ok((DefinitionNode::Variable(var_def_node), adv));
         }
-
         if let Ok(
             (vec_def_node, adv)
         ) = VectorDefinitionNode::parse(input) {
             return Ok((DefinitionNode::Vector(vec_def_node), adv));
         }
-
         if let Ok(
             (fn_def_node, adv)
         ) = FunctionDefinitionNode::parse(input) {
             return Ok((DefinitionNode::Function(fn_def_node), adv));
         }
-
         Err(())
     }
 }
@@ -1106,14 +1074,12 @@ impl Parse for ProgramNode {
         where Self: Sized {
         let mut defs = vec![];
         let mut offset: usize = 0;
-
         while let Ok(
             (def_node, adv)
         ) = DefinitionNode::parse(&input[offset..]) {
             offset += adv;
             defs.push(def_node);
         }
-
         if offset != input.len() {
             Err(())
         } else {
@@ -1136,16 +1102,25 @@ enum BracketsError {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct MultiMap<K: cmp::Eq + Hash, V> {
+pub(crate) struct MultiMap<K: Eq + Hash, V> {
     data: HashMap<K, Vec<V>>,
     size: usize,
+}
+
+impl<K: Eq + Hash, V> From<HashMap<K, V>> for MultiMap<K, V> {
+    fn from(value: HashMap<K, V>) -> Self {
+        MultiMap {
+            size: value.len(),
+            data: value.into_iter().map(|(k, v)| (k, vec![v])).collect(),
+        }
+    }
 }
 
 impl<K: Eq + Hash + Clone, V: Clone> TryFrom<MultiMap<K, V>> for HashMap<K, V> {
     type Error = ();
 
     fn try_from(value: MultiMap<K, V>) -> Result<Self, Self::Error> {
-        let mut res = HashMap::<K, V>::new();
+        let mut res = HashMap::new();
         for (k, v) in value.get_inner() {
             if v.len() != 1 {
                 return Err(());
@@ -1161,23 +1136,24 @@ impl<K: Eq + Hash, V> MultiMap<K, V> {
         MultiMap { data: Default::default(), size: 0 }
     }
 
-    pub fn get_inner(&self) -> &HashMap<K, Vec<V>> {
+    fn get_inner(&self) -> &HashMap<K, Vec<V>> {
         &self.data
     }
 
     pub fn extract_inner(self) -> HashMap<K, Vec<V>> {
         self.data
     }
-}
 
-impl<K: Eq + Hash, V> MultiMap<K, V> {
-    fn len(&self) -> usize {
+    pub fn total_items(&self) -> usize {
         self.size
     }
 
-    fn insert(&mut self, key: K, value: V) {
-        self.size += 1;
+    pub fn key_count(&self) -> usize {
+        self.get_inner().len()
+    }
 
+    pub fn insert(&mut self, key: K, value: V) {
+        self.size += 1;
         if let Some(vals) = self.data.get_mut(&key) {
             vals.push(value)
         } else {
@@ -1185,14 +1161,14 @@ impl<K: Eq + Hash, V> MultiMap<K, V> {
         }
     }
 
-    fn get_last<Q: ?Sized>(&self, k: &Q) -> Option<&V>
+    pub fn get_last<Q: ?Sized>(&self, k: &Q) -> Option<&V>
         where K: Borrow<Q>, Q: Hash + Eq {
         self.data.get(k)?.last()
     }
 
-    fn contains_key<Q: ?Sized>(&self, k: &Q) -> bool
+    pub fn contains_key<Q: ?Sized>(&self, k: &Q) -> bool
         where K: Borrow<Q>, Q: Hash + Eq {
-        self.data.contains_key(k)
+        self.get_inner().contains_key(k)
     }
 }
 
@@ -1298,7 +1274,7 @@ impl Parser<'_> {
             return Err(err);
         }
 
-        let analyzer = Analyzer { source_code: self.source_code };
+        let mut analyzer = Analyzer::new(self.source_code);
         let res = prog_node.unwrap().flatten_node();
         Ok(analyzer.run(res, issues))
     }

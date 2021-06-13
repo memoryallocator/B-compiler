@@ -3,7 +3,7 @@ use std::*;
 use ast::*;
 use token::TokenPos;
 
-use crate::lexical_analyzer::token;
+use crate::tokenizer::token;
 use crate::parser::ast;
 
 pub(crate) trait FlattenNode {
@@ -38,7 +38,7 @@ impl From<ast::Ival> for Ival {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub(crate) enum FlatDefinitionNameInfo {
+pub(crate) enum FlatDefinitionInfo {
     Variable { ival: Option<Ival> },
     Vector { specified_size: Option<ConstantNode>, ivals: Vec<Ival> },
     Function { params: Vec<(String, TokenPos)> },
@@ -47,7 +47,7 @@ pub(crate) enum FlatDefinitionNameInfo {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct FlatDefinition {
     pub(crate) name: String,
-    pub(crate) info: FlatDefinitionNameInfo,
+    pub(crate) info: FlatDefinitionInfo,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -109,7 +109,7 @@ impl FlattenNode for VariableDefinitionNode {
         vec![FlatNodeAndPos {
             node: FlatNode::Def(FlatDefinition {
                 name: self.name,
-                info: FlatDefinitionNameInfo::Variable {
+                info: FlatDefinitionInfo::Variable {
                     ival: if let Some(ival) = self.initial_value {
                         Some(Ival::from(ival))
                     } else {
@@ -127,7 +127,7 @@ impl FlattenNode for VectorDefinitionNode {
         vec![FlatNodeAndPos {
             node: FlatNode::Def(FlatDefinition {
                 name: self.name,
-                info: FlatDefinitionNameInfo::Vector {
+                info: FlatDefinitionInfo::Vector {
                     specified_size: self.specified_size,
                     ivals: self.initial_values
                         .into_iter()
@@ -145,7 +145,7 @@ impl FlattenNode for FunctionDefinitionNode {
         let mut res = vec![FlatNodeAndPos {
             node: FlatNode::Def(FlatDefinition {
                 name: self.name,
-                info: FlatDefinitionNameInfo::Function { params: self.parameters },
+                info: FlatDefinitionInfo::Function { params: self.parameters },
             }),
             pos: self.position,
         }];

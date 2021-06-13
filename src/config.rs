@@ -2,7 +2,7 @@ use std::*;
 use collections::{HashMap, HashSet};
 use fmt;
 
-use crate::lexical_analyzer::token;
+use crate::tokenizer::token;
 use token::*;
 use crate::parser::{DefInfoAndPos, DeclInfoAndPos};
 
@@ -35,7 +35,7 @@ pub(crate) enum Issue {
         decl: (String, DeclInfoAndPos),
         global_def: DefInfoAndPos,
     },
-    DeclarationShadowsFnParameter {
+    DeclShadowsFnParameter {
         decl: (String, DeclInfoAndPos),
         param_pos: TokenPos,
         fn_def: (String, TokenPos),
@@ -44,13 +44,15 @@ pub(crate) enum Issue {
         curr_decl: (String, TokenPos),
         prev_import_pos: TokenPos,
     },
-    DeclarationShadowsPrevious {
+    DeclShadowsPrevious {
         decl: (String, DeclInfoAndPos),
         prev_decl: DeclInfoAndPos,
     },
     UnexpectedKeyword(TokenPos),
     CaseEncounteredTwice(TokenPos),
-    IntegerLiteralTooLarge(TokenPos),
+    LiteralTooLong(TokenPos),
+    NameHasNoRvalue(String, TokenPos),
+    NoMainFn,
 }
 
 fn def_pos_to_string(def_pos: &Option<TokenPos>) -> String {
@@ -65,20 +67,25 @@ impl fmt::Display for Issue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Issue::*;
         write!(f, "{}", match self {
-            ParsingError => "Failed to parse".to_string(),
+            ParsingError => "failed to parse".to_string(),
 
             NameRedefined {
                 curr_def: (name, pos),
                 prev_def: DefInfoAndPos { pos_if_user_defined, .. }
             } => {
-                format!("Name {}, defined at {}, was already defined {}",
+                format!("name {}, defined at {}, was already defined {}",
                         name, pos,
                         def_pos_to_string(pos_if_user_defined))
             }
 
             VecSizeIsNotANumber { vec_def: (name, def_pos), size } => {
-                format!("Size {} of vector {}, defined at {}, is not a number",
+                format!("size {} of vector {}, defined at {}, is not a number",
                         size, name, def_pos)
+            }
+
+            DeclShadowsGlobalDef { decl: (name, info), global_def } => {
+                format!("declaration of name {} at {} shadows global definition {}",
+                        name, info.pos, def_pos_to_string(&global_def.pos_if_user_defined))
             }
 
             _ => todo!()
@@ -96,6 +103,14 @@ impl fmt::Display for Arch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Arch::x86_64 => write!(f, "x86-64"),
+        }
+    }
+}
+
+impl Arch {
+    pub(crate) fn ptr_size(&self) -> u8 {
+        match self {
+            Arch::x86_64 => 8,
         }
     }
 }
@@ -124,7 +139,39 @@ pub(crate) struct TargetPlatform {
     pub(crate) arch: Arch,
 }
 
+impl Default for TargetPlatform {
+    fn default() -> Self {
+        TargetPlatform {
+            platform_name: PlatformName::Linux,
+            arch: Arch::x86_64,
+        }
+    }
+}
+
+pub(crate) struct CallingConvention {
+    pub(crate) registers_to_pass_args: Vec<&'static str>,
+    pub(crate) shadow_space_size: Option<u64>,
+}
+
 impl TargetPlatform {
+    pub(crate) fn calling_convention(&self) -> CallingConvention {
+        match self {
+            TargetPlatform {
+                platform_name: PlatformName::Windows, arch: Arch::x86_64
+            } => CallingConvention {
+                registers_to_pass_args: vec!["rcx", "rdx", "r8", "r9"],
+                shadow_space_size: Some(4),
+            },
+            TargetPlatform {
+                platform_name: PlatformName::Linux, arch: Arch::x86_64
+            } => CallingConvention {
+                registers_to_pass_args: vec!["rdi", "rsi", "rdx", "r10", "r8", "r9"],
+                shadow_space_size: None,
+            },
+            _ => todo!()
+        }
+    }
+
     pub(crate) fn native() -> Self {
         TargetPlatform {
             platform_name:
@@ -156,18 +203,19 @@ impl TargetPlatform {
     }
 }
 
-impl Default for TargetPlatform {
-    fn default() -> Self {
-        TargetPlatform {
-            platform_name: PlatformName::Linux,
-            arch: Arch::x86_64,
-        }
-    }
-}
-
-#[derive(Default, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub(crate) struct CompilerOptions {
     pub(crate) target_platform: TargetPlatform,
+    pub(crate) short_circuit: bool,
+}
+
+impl Default for CompilerOptions {
+    fn default() -> Self {
+        CompilerOptions {
+            target_platform: Default::default(),
+            short_circuit: true,
+        }
+    }
 }
 
 pub(crate) fn get_escape_sequences() -> HashMap<String, String> {
@@ -185,7 +233,8 @@ pub(crate) fn get_escape_sequences() -> HashMap<String, String> {
         .collect()
 }
 
-pub(crate) type ReservedSymbolsTable = HashMap<String, ReservedName>;
+pub(crate) type ReservedSymbolsTable = HashMap<String,
+    ReservedName>;
 
 pub(crate) fn get_reserved_symbols() -> ReservedSymbolsTable {
     use DeclarationSpecifier::*;
@@ -213,15 +262,23 @@ pub(crate) enum NumberOfParameters {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub(crate) struct FnDef {
+    pub(crate) num_of_params: NumberOfParameters,
+    pub(crate) has_rvalue: bool,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub(crate) enum StdNameInfo {
-    Variable { ival: isize },
-    Function { num_of_params: NumberOfParameters },
+    Variable {
+        ival: i64
+    },
+    Function(FnDef),
 }
 
 pub(crate) fn get_standard_library_names() -> HashMap<&'static str, StdNameInfo> {
     let mut std_lib_fns_with_exact_num_of_params = Vec::<(&'static str, usize)>::new();
 
-    std_lib_fns_with_exact_num_of_params.append(&mut (|| {
+    std_lib_fns_with_exact_num_of_params.append(&mut
         vec![
             ("getchar", 0),
             ("putchar", 1),
@@ -233,49 +290,43 @@ pub(crate) fn get_standard_library_names() -> HashMap<&'static str, StdNameInfo>
             ("close", 1),
             ("flush", 0),
             ("reread", 0)
-        ].into_iter()
-            .map(|x| (x.0, x.1))
-            .collect()
-    })());
+        ]);
 
     std_lib_fns_with_exact_num_of_params.push(("ioerrors", 1));
 
-    std_lib_fns_with_exact_num_of_params.append(&mut (|| {
+    std_lib_fns_with_exact_num_of_params.append(&mut
         vec![
             ("char", 2),
             ("lchar", 3),
             ("getarg", 3),
-        ].into_iter()
-            .map(|x| (x.0, x.1))
-            .collect()
-    })());
+        ]);
 
-    std_lib_fns_with_exact_num_of_params.append(&mut (|| {
+    std_lib_fns_with_exact_num_of_params.append(&mut
         vec![
             ("getvec", 1),
             ("rlsevec", 2),
             ("nargs", 0),
             ("exit", 0)
-        ].into_iter()
-            .map(|x| (x.0, x.1))
-            .collect()
-    })());
+        ]);
 
     let std_lib_fns_with_exact_num_of_params = std_lib_fns_with_exact_num_of_params
         .into_iter()
         .map(|(name, num_of_params)|
             (name,
-             StdNameInfo::Function {
-                 num_of_params: NumberOfParameters::Exact(num_of_params)
-             }))
+             StdNameInfo::Function(FnDef {
+                 num_of_params: NumberOfParameters::Exact(num_of_params),
+                 has_rvalue: if name != "nargs" { true } else { false },
+             })))
         .collect::<HashMap<&'static str, StdNameInfo>>();
 
-    let printf = ("printf", StdNameInfo::Function {
-        num_of_params: NumberOfParameters::AtLeast(1)
-    });
-    let concat = ("concat", StdNameInfo::Function {
+    let printf = ("printf", StdNameInfo::Function(FnDef {
         num_of_params: NumberOfParameters::AtLeast(1),
-    });
+        has_rvalue: true,
+    }));
+    let concat = ("concat", StdNameInfo::Function(FnDef {
+        num_of_params: NumberOfParameters::AtLeast(1),
+        has_rvalue: true,
+    }));
     let mut std_lib_fns_with_variable_num_of_params = HashSet::new();
     std_lib_fns_with_variable_num_of_params.extend(vec![printf, concat].into_iter());
 

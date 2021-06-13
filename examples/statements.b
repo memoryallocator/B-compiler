@@ -35,6 +35,7 @@ labl:
         }
         xy = j/2;
     }
+    auto j; j = x * xy;
 more:
     printf("j = %d, xy = %d*n", j, xy);
 }

@@ -66,7 +66,6 @@ pub(crate) enum LeftOrRight {
 #[derive(PartialEq, Eq, Clone, Debug, Hash)]
 pub(crate) enum Constant {
     Number(u64),
-    Char(String),
     String(String)
 }
 
@@ -144,7 +143,7 @@ impl From<RichBinaryOperation> for Assign {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub(crate) enum IncDec {
+pub(crate) enum IncOrDec {
     Increment,
     Decrement,
 }
@@ -158,7 +157,7 @@ pub(crate) enum Operator {
     Unary(UnaryOperation),
     Binary(BinaryOperation),
     Assign(Assign),
-    IncDec(IncDec),
+    IncDec(IncOrDec),
 }
 
 impl TryFrom<&Token> for Operator {
