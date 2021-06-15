@@ -1,7 +1,9 @@
 use std::*;
 use process;
+use fs;
 
 use crate::config::*;
+use std::io::Write;
 
 mod tokenizer;
 mod parser;
@@ -9,44 +11,22 @@ mod config;
 mod intermediate_code_generator;
 mod machine_code_generator;
 
-fn process_command_line_arguments() -> Result<(String, CompilerOptions), String> {
+fn parse_command_line_arguments() -> Result<(String, CompilerOptions, String), String> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         return Err("not enough arguments".to_string());
     }
-
-    let mut options = CompilerOptions::default();
-    let target_pattern = "--target=";
-
-    let mut i: usize = 2;
-    while let Some(option_str) = args.get(i) {
-        let option_str = &args[i];
-        if option_str.starts_with(target_pattern) {
-            let target = &args[i][target_pattern.len()..];
-            match target {
-                "native" => {
-                    options.target_platform = TargetPlatform::native();
-                }
-                _ => {
-                    return Err(format!("unknown target: {}", target));
-                }
-            }
-        } else {
-            return Err(format!("unknown compiler option: {}", option_str));
-        }
-        i += 1;
-    }
-    Ok((args[1].clone(), options))
+    Ok((args[1].clone(), CompilerOptions::default(), "a.asm".to_string()))
 }
 
 fn main() {
-    let (filename, compiler_options) = process_command_line_arguments()
+    let (filename, compiler_options, output_file) = parse_command_line_arguments()
         .unwrap_or_else(|err| {
             eprintln!("Something went wrong parsing arguments: {}", err);
             process::exit(1);
         });
 
-    let source_code = std::fs::read_to_string(filename).unwrap_or_else(|err| {
+    let source_code = fs::read_to_string(filename).unwrap_or_else(|err| {
         eprintln!("Something went wrong reading the file: {}", err);
         process::exit(1);
     });
@@ -109,12 +89,26 @@ fn main() {
         = intermediate_code_generator::IntermediateCodeGenerator::new(compiler_options,
                                                                       &scope_table.global);
     let (intermediate_code, pooled_strings) = processor.run(&scope_table);
-    dbg!(&intermediate_code);
 
     let processor = machine_code_generator::MachineCodeGenerator::new(compiler_options,
                                                                       intermediate_code,
                                                                       pooled_strings);
     let res = processor.run();
 
-    println!("{}", &res);
+    let ok: Result<(), io::Error> = (|| {
+        let mut output_file = fs::File::create(output_file)?;
+        for line in &res {
+            output_file.write(line.as_bytes())?;
+            output_file.write(&['\n' as u8])?;
+        }
+        Ok(())
+    })();
+    if let Err(err) = ok {
+        eprintln!("Something went wrong writing the output file: {}", err);
+        eprintln!("\n\n\n");
+        for line in res {
+            println!("{}", line)
+        }
+        process::exit(1);
+    }
 }

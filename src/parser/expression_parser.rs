@@ -27,26 +27,31 @@ impl Parse for BracketedExpression {
             if input.is_empty() {  // ( )
                 return Ok(BracketedExpression::FunctionArgumentList(vec![]));
             }
-
-            let single_rvalue = RvalueNode::parse_exact(input);
-            if let Ok(single_rvalue) = single_rvalue {
-                return Ok(BracketedExpression::RoundBracketedExpression(single_rvalue));
-            }
-
             let mut arguments = vec![];
             let mut arg_starts_from: usize = 0;
-
-            for (i, t) in input.into_iter().enumerate() {
-                if let WrappedToken::Comma = t.token {
-                    let arg = RvalueNode::parse_exact(&input[arg_starts_from..i])?;
-                    arguments.push(arg);
-                    arg_starts_from = i + 1;
+            let mut i: usize = 0;
+            while let Some(t) = input.get(i) {
+                match t.token {
+                    WrappedToken::Comma => {
+                        let arg = RvalueNode::parse_exact(&input[arg_starts_from..i])?;
+                        arguments.push(arg);
+                        arg_starts_from = i + 1;
+                    }
+                    WrappedToken::Bracket(br) => {
+                        if br.bracket_type == BracketType::Round {
+                            let inner = extract_bracketed_expression(&input[i..])?;
+                            let adv = 1 + inner.len() + 1;
+                            i += adv;
+                            continue;
+                        }
+                    }
+                    _ => (),
                 }
+                i += 1;
             }
-
             let last_rvalue = RvalueNode::parse_exact(&input[arg_starts_from..])?;
             return if arguments.is_empty() {
-                unreachable!()
+                Ok(BracketedExpression::RoundBracketedExpression(last_rvalue))
             } else {
                 arguments.push(last_rvalue);
                 Ok(BracketedExpression::FunctionArgumentList(arguments))

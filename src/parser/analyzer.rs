@@ -15,7 +15,7 @@ use parser::ast;
 
 #[derive(Debug, Clone)]
 pub(crate) enum ProcessedDeclInfo {
-    AssumedExternFnCall,
+    AssumedExternFnCall(DefInfoAndPos),
     Auto { size_if_vec: Option<u64> },
     ExplicitExtern(DefInfoAndPos),
     Label,
@@ -163,9 +163,9 @@ impl<'a> Analyzer<'a> {
         if let Some(prev_decl) = local_scope.insert(name.clone(), decl_info_and_pos.clone()) {
             use ProcessedDeclInfo::*;
             match prev_decl.info {
-                ExplicitExtern(_) | AssumedExternFnCall | Auto { .. } => {
+                ExplicitExtern(_) | AssumedExternFnCall(_) | Auto { .. } => {
                     let prev_decl_is_in_this_block = prev_decl.pos >= block_starts_at;
-                    if let AssumedExternFnCall | ExplicitExtern(_) = prev_decl.info {
+                    if let AssumedExternFnCall(_) | ExplicitExtern(_) = prev_decl.info {
                         if let ExplicitDeclType::Extern = explicit_decl_type {
                             issues.push(UnnecessaryImport {
                                 curr_decl: (name.clone(), pos),
@@ -328,19 +328,19 @@ impl<'a> Analyzer<'a> {
                             pos: lv.position,
                         })
                     }
-                    Some(
-                        DeclInfoAndPos {
-                            info: ProcessedDeclInfo::ExplicitExtern(
-                                DefInfoAndPos {
-                                    info: DefInfo::Function(
-                                        FnDef { has_rvalue: false, .. }), ..
+                    Some(DeclInfoAndPos { info, .. }) => {
+                        match info {
+                            ProcessedDeclInfo::AssumedExternFnCall(info)
+                            | ProcessedDeclInfo::ExplicitExtern(info) => {
+                                if let DefInfo::Function(
+                                    FnDef { has_rvalue: false, .. }
+                                ) = info.info {
+                                    issues.push(Issue::NameHasNoRvalue(name.clone(), lv.position))
                                 }
-                            ), ..
+                            }
+                            _ => (),
                         }
-                    ) => {
-                        issues.push(Issue::NameHasNoRvalue(name.clone(), lv.position))
                     }
-                    _ => ()
                 }
                 vec![]
             }
@@ -388,7 +388,7 @@ impl<'a> Analyzer<'a> {
 
                 BracketedExpression(expr) => vec![expr],
                 FunctionCall(fn_call) => {
-                    let mut rvs_to_pr = vec![];
+                    let mut rvalue_to_process = vec![];
                     if let Rvalue::Lvalue(
                         LvalueNode {
                             position,
@@ -396,12 +396,12 @@ impl<'a> Analyzer<'a> {
                         }
                     ) = &*fn_call.fn_name.rvalue {
                         if !local_scope.contains_key(name) {
-                            if self.global_scope.get_mut().contains_key(name) {
+                            if let Some(info) = self.global_scope.get_mut().get(name) {
                                 local_scope.insert(
                                     name.clone(),
                                     DeclInfoAndPos {
                                         pos: *position,
-                                        info: ProcessedDeclInfo::AssumedExternFnCall,
+                                        info: ProcessedDeclInfo::AssumedExternFnCall(info.clone()),
                                     });
                             } else {
                                 issues.push(Issue::NameNotDefined {
@@ -411,17 +411,17 @@ impl<'a> Analyzer<'a> {
                             }
                         }
                     } else {
-                        rvs_to_pr.push(&fn_call.fn_name)
+                        rvalue_to_process.push(&fn_call.fn_name)
                     }
-                    rvs_to_pr.append(
+                    rvalue_to_process.append(
                         &mut fn_call.arguments
                             .iter()
                             .collect());
-                    rvs_to_pr
+                    rvalue_to_process
                 }
             };
         for x in rvalues_to_process {
-            self.process_rvalue(&*x.rvalue, local_scope, issues)
+            self.process_rvalue(&x.rvalue, local_scope, issues)
         }
     }
 

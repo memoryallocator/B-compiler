@@ -94,7 +94,7 @@ impl fmt::Display for Issue {
 }
 
 #[allow(non_camel_case_types)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub(crate) enum Arch {
     x86_64,
 }
@@ -108,7 +108,7 @@ impl fmt::Display for Arch {
 }
 
 impl Arch {
-    pub(crate) fn ptr_size(&self) -> u8 {
+    pub(crate) fn word_size(&self) -> u8 {
         match self {
             Arch::x86_64 => 8,
         }
@@ -116,7 +116,7 @@ impl Arch {
 }
 
 #[warn(non_camel_case_types)]
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub(crate) enum PlatformName {
     Linux,
     Windows,
@@ -133,24 +133,36 @@ impl fmt::Display for PlatformName {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub(crate) struct TargetPlatform {
     pub(crate) platform_name: PlatformName,
     pub(crate) arch: Arch,
 }
 
+pub(crate) const WIN_64: TargetPlatform = TargetPlatform {
+    platform_name: PlatformName::Windows,
+    arch: Arch::x86_64,
+};
+
+pub(crate) const LINUX_64: TargetPlatform = TargetPlatform {
+    platform_name: PlatformName::Linux,
+    arch: Arch::x86_64,
+};
+
 impl Default for TargetPlatform {
     fn default() -> Self {
-        TargetPlatform {
-            platform_name: PlatformName::Linux,
-            arch: Arch::x86_64,
-        }
+        LINUX_64
     }
 }
 
 pub(crate) struct CallingConvention {
     pub(crate) registers_to_pass_args: Vec<&'static str>,
-    pub(crate) shadow_space_size: Option<u64>,
+    pub(crate) shadow_space_size_in_bytes: u64,
+    pub(crate) main_register: &'static str,
+    pub(crate) supporting_registers: [&'static str; 2],
+    pub(crate) alignment: u8,
+    pub(crate) reg_for_calls: &'static str,
+    pub(crate) reg_for_initial_rsp: &'static str,
 }
 
 impl TargetPlatform {
@@ -160,13 +172,23 @@ impl TargetPlatform {
                 platform_name: PlatformName::Windows, arch: Arch::x86_64
             } => CallingConvention {
                 registers_to_pass_args: vec!["rcx", "rdx", "r8", "r9"],
-                shadow_space_size: Some(4),
+                shadow_space_size_in_bytes: 4 * 8,
+                main_register: "rax",
+                supporting_registers: ["r10", "r11"],
+                alignment: 16,
+                reg_for_calls: "r14",
+                reg_for_initial_rsp: "r15",
             },
             TargetPlatform {
                 platform_name: PlatformName::Linux, arch: Arch::x86_64
             } => CallingConvention {
                 registers_to_pass_args: vec!["rdi", "rsi", "rdx", "r10", "r8", "r9"],
-                shadow_space_size: None,
+                shadow_space_size_in_bytes: 0,
+                main_register: "rax",
+                supporting_registers: ["rcx", "r11"],
+                alignment: 16,
+                reg_for_calls: "r14",
+                reg_for_initial_rsp: "r15",
             },
             _ => todo!()
         }
@@ -212,7 +234,7 @@ pub(crate) struct CompilerOptions {
 impl Default for CompilerOptions {
     fn default() -> Self {
         CompilerOptions {
-            target_platform: Default::default(),
+            target_platform: TargetPlatform::native(),
             short_circuit: true,
         }
     }
@@ -225,7 +247,7 @@ pub(crate) fn get_escape_sequences() -> HashMap<String, String> {
          (')', '}'),
          ('t', '\t'),
          ('*', '*'),
-         ('\'', '\''),
+         ('\'', '\\'),
          ('"', '"'),
          ('n', '\n')]
         .into_iter()

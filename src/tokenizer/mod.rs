@@ -108,6 +108,14 @@ fn parse_operator<'a, I>(op: I) -> Option<(Operator, usize)>
     );
 }
 
+pub(crate) fn char_to_u64(char: &str) -> u64 {
+    let mut char_as_u64: u64 = 0;
+    for (i, char) in char.chars().enumerate() {
+        char_as_u64 |= (char as u64) << (i * 8);
+    }
+    char_as_u64
+}
+
 impl Tokenizer<'_> {
     fn tokenize(&self, source_code: &str, issues: &mut Vec<Issue>) -> Result<Vec<Token>, String> {
         let mut res = vec![];
@@ -185,14 +193,10 @@ impl Tokenizer<'_> {
                                     CommentOrCharOrString::Char => {
                                         let char = buffer.take();
                                         if char.len() > self.compiler_options
-                                            .target_platform.arch.ptr_size() as usize {
+                                            .target_platform.arch.word_size() as usize {
                                             issues.push(Issue::LiteralTooLong(pos))
                                         }
-                                        let mut char_as_u64: u64 = 0;
-                                        for (i, char) in char.chars().rev().enumerate() {
-                                            char_as_u64 |= (char as u64) << (i * 8);
-                                        }
-                                        Constant::Number(char_as_u64)
+                                        Constant::Number(char_to_u64(&char))
                                     }
                                     _ => unreachable!(),
                                 }),

@@ -24,8 +24,7 @@ pub(crate) enum Ival {
 
 #[derive(Debug)]
 pub(crate) struct FnInfo {
-    // num_of_params: usize,
-    stack_size: u64,
+    pub(crate) stack_size: u64,
 }
 
 #[derive(Debug)]
@@ -38,7 +37,7 @@ pub(crate) enum Label {
 #[derive(Debug)]
 pub(crate) enum Lvalue {
     NthArg(u64),
-    NthLocalVar(u64),
+    LocalVar(StackRange),
     Label(Label),
 }
 
@@ -62,8 +61,8 @@ enum StmtRequiringEndMarker<'a> {
 
 #[derive(Debug)]
 pub(crate) struct IncDec {
-    inc_or_dec: IncOrDec,
-    inc_dec_type: IncDecType,
+    pub(crate) inc_or_dec: IncOrDec,
+    pub(crate) inc_dec_type: IncDecType,
 }
 
 #[derive(Debug)]
@@ -130,8 +129,8 @@ pub(crate) enum IntermRepr {
     BinOp(BinaryOp),
     LvUnary(IncDec),
     RvUnary(RvalueUnary),
-    SetNthArg(u64),
     Call { nargs: u64 },
+    Nargs,
     Goto,
     Ret,
 }
@@ -149,7 +148,7 @@ pub(crate) struct IntermediateCodeGenerator<'a> {
     params_order: HashMap<&'a String, u64>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(crate) enum StackRange {
     Exact(u64),
     Span(RangeInclusive<u64>),
@@ -197,15 +196,15 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 vec![LoadLvalue(
                     if let Some(info) = self.local_scope.unwrap().get(name) {
                         match info.info {
-                            ProcessedDeclInfo::AssumedExternFnCall
+                            ProcessedDeclInfo::AssumedExternFnCall(_)
                             | ProcessedDeclInfo::ExplicitExtern(_) => {
                                 Lvalue::Label(Label::Global(name.clone()))
                             }
                             ProcessedDeclInfo::Auto { .. } => {
                                 if let Some(
-                                    (n, _)
+                                    (_, st)
                                 ) = self.name_to_stack_range.get_last(&Some(name)) {
-                                    Lvalue::NthLocalVar(*n)
+                                    Lvalue::LocalVar(st.clone())
                                 } else {
                                     unreachable!()
                                 }
@@ -303,7 +302,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                             ) => {
                                 return res;  // the rvalue of a vector is its lvalue
                             }
-                            ProcessedDeclInfo::AssumedExternFnCall
+                            ProcessedDeclInfo::AssumedExternFnCall(_)
                             | ProcessedDeclInfo::ExplicitExtern(
                                 DefInfoAndPos { info: DefInfo::Function { .. }, .. }
                             ) => {
@@ -378,6 +377,13 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 self.process_rvalue(&rv.rvalue)
             }
             Rvalue::FunctionCall(FunctionCallNode { fn_name, arguments }) => {
+                if let Rvalue::Lvalue(
+                    ast::LvalueNode { lvalue: ast::Lvalue::Name(fn_name), .. }
+                ) = &*fn_name.rvalue {
+                    if fn_name == "nargs" {
+                        return vec![Nargs];
+                    }
+                }
                 let mut res = vec![];
                 for arg in arguments.iter().rev() {
                     res.append(&mut self.process_rvalue(&arg.rvalue));
@@ -638,10 +644,6 @@ impl<'a> IntermediateCodeGenerator<'a> {
     ) -> (Vec<IntermRepr>, usize) {
         self.reset();
         let mut res = vec![];
-
-        self.name_to_stack_range.insert(None, (0 as u64, StackRange::Exact(0)));  // nargs
-        self.stack_size_in_words = 1;
-
         use IntermRepr::*;
         if let FlatNode::Def(
             FlatDefinition { name, info: FlatDefinitionInfo::Function { params } }
@@ -649,10 +651,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
             self.params_order = params.iter().enumerate().map(|(i, (param, _))| {
                 (param, i.try_into().unwrap())
             }).collect();
-            res.push(FnDef(name.clone(), FnInfo {
-                // num_of_params: params.len(),
-                stack_size: 0
-            }))
+            res.push(FnDef(name.clone(), FnInfo { stack_size: 0 }))
         } else {
             unreachable!()
         }
@@ -665,6 +664,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
             };
         let (mut rest_of_nodes, adv) = self.process_slice(curr_fn, &prog_slice[1..]);
         res.append(&mut rest_of_nodes);
+        res.push(Ret);
         (res, adv + 1)
     }
 
