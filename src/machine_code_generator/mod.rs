@@ -144,7 +144,8 @@ impl MachineCodeGenerator {
         let main_reg = call_conv.main_register;
         let reg_for_calls = call_conv.reg_for_calls;
         let word_size = self.compiler_options.target_platform.arch.word_size();
-        let mut res: Vec<String> = format!(r"
+        let mut res: Vec<String>
+            = format!(r"
                 mov {reg_for_calls}, rsp
                 and rsp, -{alignment}
                 i = 0
@@ -153,20 +154,21 @@ impl MachineCodeGenerator {
                     stack_var_count = 0
                 end if
                 while i <> stack_var_count
-                    lea {prev}, [{reg_for_calls} + i*8]
-                    lea {new}, [{new} + 8]
+                    lea {prev}, [{reg_for_calls} + i*{word_size}]
+                    lea {new}, [{new} + {word_size}]
                     mov {prev}, [{prev}]
                     mov [{new}], {prev}
                     i = i + 1
                 end while
 	            sub rsp, {shadow_space_size}",
-                                           new = call_conv.supporting_registers[0],
-                                           prev = call_conv.supporting_registers[0],
-                                           n = n,  // out = label_inside_of_align_routine("out"),
-                                           reg_for_calls = reg_for_calls,
-                                           alignment = call_conv.alignment,
-                                           shadow_space_size = call_conv.shadow_space_size_in_bytes,
-                                           param_reg_count = call_conv.registers_to_pass_args.len())
+                      new = call_conv.supporting_registers[0],
+                      prev = call_conv.supporting_registers[0],
+                      n = n,
+                      word_size = word_size,
+                      reg_for_calls = reg_for_calls,
+                      alignment = call_conv.alignment,
+                      shadow_space_size = call_conv.shadow_space_size_in_bytes,
+                      param_reg_count = call_conv.registers_to_pass_args.len())
             .split('\n')
             .filter_map(|x| { if !x.is_empty() { Some(x.trim().to_owned()) } else { None } })
             .collect();
