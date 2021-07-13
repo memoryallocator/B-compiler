@@ -240,11 +240,8 @@ impl MachineCodeGenerator {
                         Lvalue::LocalVar(st) => {
                             match st {
                                 StackRange::Exact(n) => {
-                                    // let f = format!("lea {},[{}-{}*{}]", main_reg,
-                                    //                 reg_for_initial_rsp, 1 + n, word_size);
                                     res.push(format!("lea {},[{}-{}*{}]", main_reg,
                                                      reg_for_initial_rsp, 1 + n, word_size));
-                                    // eprintln!("f is {}", f);
                                 }
                                 StackRange::Span(st) => {
                                     res.push(format!("lea {},[{}-{}*{}]", main_reg,
