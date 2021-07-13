@@ -53,6 +53,11 @@ pub(crate) enum Issue {
     LiteralTooLong(TokenPos),
     NameHasNoRvalue(String, TokenPos),
     NoMainFn,
+    InvalidParameterCount {
+        expected: NumberOfParameters,
+        actual: usize,
+        pos: TokenPos,
+    },
 }
 
 fn def_pos_to_string(def_pos: &Option<TokenPos>) -> String {
@@ -120,7 +125,6 @@ impl Arch {
 pub(crate) enum PlatformName {
     Linux,
     Windows,
-    MacOs,
 }
 
 impl fmt::Display for PlatformName {
@@ -128,7 +132,6 @@ impl fmt::Display for PlatformName {
         match self {
             PlatformName::Linux => write!(f, "Linux"),
             PlatformName::Windows => write!(f, "Windows"),
-            PlatformName::MacOs => write!(f, "macOS"),
         }
     }
 }
@@ -190,7 +193,6 @@ impl TargetPlatform {
                 reg_for_calls: "r14",
                 reg_for_initial_rsp: "r15",
             },
-            _ => todo!()
         }
     }
 
@@ -201,8 +203,6 @@ impl TargetPlatform {
                 PlatformName::Linux
             } else if cfg!(target_os = "windows") {
                 PlatformName::Windows
-            } else if cfg!(target_os = "macos") {
-                PlatformName::MacOs
             } else {
                 let default_platform = TargetPlatform::default().platform_name;
                 println!("Failed to determine the native OS. Assuming it's {}", default_platform);
@@ -229,6 +229,8 @@ impl TargetPlatform {
 pub(crate) struct CompilerOptions {
     pub(crate) target_platform: TargetPlatform,
     pub(crate) short_circuit: bool,
+    pub(crate) stack_size: u64,
+    pub(crate) heap_size: u64,
 }
 
 impl Default for CompilerOptions {
@@ -236,6 +238,8 @@ impl Default for CompilerOptions {
         CompilerOptions {
             target_platform: TargetPlatform::native(),
             short_circuit: true,
+            stack_size: 4096,
+            heap_size: 65536,
         }
     }
 }

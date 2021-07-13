@@ -1,9 +1,9 @@
 use std::*;
 use process;
 use fs;
+use io::Write;
 
 use crate::config::*;
-use std::io::Write;
 
 mod tokenizer;
 mod parser;
@@ -12,7 +12,7 @@ mod intermediate_code_generator;
 mod machine_code_generator;
 
 fn parse_command_line_arguments() -> Result<(String, CompilerOptions, String), String> {
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         return Err("not enough arguments".to_string());
     }
@@ -75,7 +75,8 @@ fn main() {
             | NoMainFn => true,
             VecWithNoSizeAndInits(_, _) | VecTooManyIvals { .. }
             | DeclShadowsGlobalDef { .. } | UnnecessaryImport { .. }
-            | DeclShadowsFnParameter { .. } | DeclShadowsPrevious { .. } => false,
+            | DeclShadowsFnParameter { .. } | DeclShadowsPrevious { .. }
+            | InvalidParameterCount { .. } => false,
         };
         eprintln!("{}: {}", if error { "error" } else { "warning" }, issue);
         at_least_1_error |= error;

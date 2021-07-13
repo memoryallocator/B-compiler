@@ -395,19 +395,50 @@ impl<'a> Analyzer<'a> {
                             lvalue: ast::Lvalue::Name(name),
                         }
                     ) = &*fn_call.fn_name.rvalue {
+                        let global_name_info = self.global_scope.get_mut().get(name);
                         if !local_scope.contains_key(name) {
-                            if let Some(info) = self.global_scope.get_mut().get(name) {
+                            if let Some(global_name_info) = global_name_info {
                                 local_scope.insert(
                                     name.clone(),
                                     DeclInfoAndPos {
                                         pos: *position,
-                                        info: ProcessedDeclInfo::AssumedExternFnCall(info.clone()),
+                                        info: ProcessedDeclInfo::AssumedExternFnCall(
+                                            global_name_info.clone()),
                                     });
                             } else {
                                 issues.push(Issue::NameNotDefined {
                                     name: name.clone(),
                                     pos: *position,
                                 })
+                            }
+                        }
+                        if let Some(
+                            DeclInfoAndPos { info, .. }
+                        ) = local_scope.get(name) {
+                            if let ProcessedDeclInfo::AssumedExternFnCall(def)
+                            | ProcessedDeclInfo::ExplicitExtern(def) = info {
+                                if let DefInfoAndPos {
+                                    info: DefInfo::Function(FnDef { num_of_params, .. }), ..
+                                } = def {
+                                    let actual_param_count = fn_call.arguments.len();
+                                    let fn_pos = position;
+                                    let invalid_param_count =
+                                        match num_of_params {
+                                            NumberOfParameters::Exact(n) => {
+                                                actual_param_count != *n
+                                            }
+                                            NumberOfParameters::AtLeast(n) => {
+                                                actual_param_count < *n
+                                            }
+                                        };
+                                    if invalid_param_count {
+                                        issues.push(Issue::InvalidParameterCount {
+                                            expected: *num_of_params,
+                                            actual: actual_param_count,
+                                            pos: *fn_pos,
+                                        })
+                                    }
+                                }
                             }
                         }
                     } else {

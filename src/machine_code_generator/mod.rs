@@ -198,7 +198,8 @@ impl MachineCodeGenerator {
 
     fn generate_x86_64(self) -> Vec<String> {
         use IntermRepr::*;
-        let target = self.compiler_options.target_platform;
+        let comp_opts = self.compiler_options;
+        let target = comp_opts.target_platform;
         let call_conv = target.calling_convention();
         let main_reg = call_conv.main_register;
         let supp_regs = call_conv.supporting_registers;
@@ -208,13 +209,12 @@ impl MachineCodeGenerator {
 
         let mut res =
             match target {
-                TargetPlatform {
-                    platform_name: PlatformName::Windows, arch: Arch::x86_64
-                } => vec!["format PE64 console".to_owned()],
+                WIN_64 => vec!["format PE64 console".to_owned(),
+                               format!("stack {}", comp_opts.stack_size),
+                               format!("heap {}", comp_opts.heap_size)],
                 TargetPlatform {
                     platform_name: PlatformName::Linux, arch: Arch::x86_64
                 } => todo!(),
-                _ => todo!()
             };
         res.push(format!("entry {}", START));
 
@@ -436,9 +436,7 @@ impl MachineCodeGenerator {
                     db 'GetCommandLineA',0
                 ".split('\n')
                     .filter_map(|x| {
-                        if !x.is_empty() {
-                            Some(x.trim().to_owned())
-                        } else { None }
+                        if !x.is_empty() { Some(x.trim().to_owned()) } else { None }
                     }))
             }
             _ => todo!()

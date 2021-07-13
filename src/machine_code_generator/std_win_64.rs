@@ -86,9 +86,7 @@ pub(crate) fn generate_std_lib_and_internals(already_defined: HashSet<&str>) -> 
                     _ => "dq 0".to_owned(),
                 }.split('\n')
                     .filter_map(|x| {
-                        if !x.is_empty() {
-                            Some(x.trim().to_owned())
-                        } else { None }
+                        if !x.is_empty() { Some(x.trim().to_owned()) } else { None }
                     }))
             }
         }
