@@ -5,6 +5,7 @@ use convert::TryFrom;
 
 use crate::tokenizer::token;
 use token::*;
+use crate::config::Issue;
 
 #[derive(Debug)]
 pub(crate) enum Ival {
@@ -19,7 +20,7 @@ pub(crate) struct ConstantNode {
 }
 
 impl TryFrom<&Token> for ConstantNode {
-    type Error = ();
+    type Error = Issue;
 
     fn try_from(t: &Token) -> Result<Self, Self::Error> {
         if let WrappedToken::Constant(constant) = &t.token {
@@ -28,7 +29,7 @@ impl TryFrom<&Token> for ConstantNode {
                 constant: constant.clone(),
             })
         } else {
-            Err(())
+            Err(Issue::ParsingError(t.pos))
         }
     }
 }

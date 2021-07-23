@@ -10,7 +10,22 @@ pub(crate) enum Issue {
     BracketNotOpened(TokenPos),
     BracketNotClosed(TokenPos),
     EmptyTokenStream,
-    ParsingError,
+    ParsingError(TokenPos),
+    FailedToParseExact(TokenPos),
+    UnexpectedToken(TokenPos),
+    ExpectedTokenNotFound(TokenPos),
+    StmtTooShort(TokenPos),
+    NoNextStmtAfterDecl(TokenPos),
+    EmptyBracketedExpr(TokenPos),
+    WrongConstant(TokenPos),
+    ExpectedPrimaryExpr(TokenPos),
+    OpCannotBeApplied { op_pos: TokenPos, expr_pos: Option<TokenPos> },
+    UnexpectedOperand(TokenPos),
+    NoOperandForOperator(Operator, TokenPos, Option<LeftOrRight>),
+    NoCondition(TokenPos),
+    NoColonInCond(TokenPos),
+    NotAnLvalue(TokenPos),
+    NoInputToken(TokenPos),
     NameNotDefined { name: String, pos: TokenPos },
     NameRedefined {
         curr_def: (String, TokenPos),
@@ -21,7 +36,7 @@ pub(crate) enum Issue {
         prev_decl: DeclInfoAndPos,
     },
     VecWithNoSizeAndInits(String, TokenPos),
-    VecSizeIsNotANumber { vec_def: (String, TokenPos), size: String },
+    VecSizeIsNotANumber { name: String, pos: TokenPos },
     VecTooManyIvals {
         vec_def: (String, TokenPos),
         ivals_len: usize,
@@ -72,7 +87,7 @@ impl fmt::Display for Issue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Issue::*;
         write!(f, "{}", match self {
-            ParsingError => "failed to parse".to_string(),
+            ParsingError(pos) => format!("{}: failed to parse", def_pos_to_string(&Some(*pos))),
 
             NameRedefined {
                 curr_def: (name, pos),
@@ -83,9 +98,8 @@ impl fmt::Display for Issue {
                         def_pos_to_string(pos_if_user_defined))
             }
 
-            VecSizeIsNotANumber { vec_def: (name, def_pos), size } => {
-                format!("size {} of vector {}, defined at {}, is not a number",
-                        size, name, def_pos)
+            VecSizeIsNotANumber { name, pos } => {
+                format!("size of vector {}, defined at {}, is not a number", name, pos)
             }
 
             DeclShadowsGlobalDef { decl: (name, info), global_def } => {

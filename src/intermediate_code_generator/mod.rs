@@ -475,10 +475,10 @@ impl<'a> IntermediateCodeGenerator<'a> {
             }
             FlatNode::Case(constant) => {
                 let idx = self.last_breakable_stmt_idxs_stack.last().unwrap();
-                let switch = &mut self.stmts_requiring_end_marker[*idx];
+                let switch_stmt = &mut self.stmts_requiring_end_marker[*idx];
                 if let StmtRequiringEndMarker::Switch {
                     regular_cases, default_case_label, ..
-                } = switch {
+                } = switch_stmt {
                     let label_no = self.label_counter.next().unwrap();
                     if let Some(
                         ConstantNode { constant: Constant::Number(case_val), .. }

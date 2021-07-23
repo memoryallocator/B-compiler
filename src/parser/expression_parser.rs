@@ -5,6 +5,7 @@ use cell::Cell;
 
 use crate::tokenizer::token;
 use token::*;
+use crate::config::Issue;
 
 use crate::parser::ast::*;
 use crate::parser::{Parse, ParseExact, extract_bracketed_expression};
@@ -17,13 +18,14 @@ enum BracketedExpression {
 }
 
 impl Parse for BracketedExpression {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
-        if input.is_empty() {
-            return Err(());
-        }
+        debug_assert!(!input.is_empty());
+        use Issue::*;
 
-        fn parse_round_brackets_content(input: &[Token]) -> Result<BracketedExpression, ()> {
+        fn parse_round_brackets_content(
+            input: &[Token]
+        ) -> Result<BracketedExpression, Vec<Issue>> {
             if input.is_empty() {  // ( )
                 return Ok(BracketedExpression::FunctionArgumentList(vec![]));
             }
@@ -58,6 +60,7 @@ impl Parse for BracketedExpression {
             };
         }
 
+        let pos = input[0].pos;
         return if let WrappedToken::Bracket(br) = input[0].token {
             let expr = extract_bracketed_expression(input)?;
             let adv = 1 + expr.len() + 1;
@@ -72,10 +75,10 @@ impl Parse for BracketedExpression {
                     let node = RvalueNode::parse_exact(expr)?;
                     Ok((BracketedExpression::SquareBracketedExpression(node), adv))
                 }
-                Curly => Err(()),
+                Curly => Err(vec![UnexpectedToken(pos)]),
             }
         } else {
-            Err(())
+            Err(vec![UnexpectedToken(pos)])
         };
     }
 }
@@ -149,13 +152,14 @@ impl From<PrimaryExpressionAndPos> for RvalueNode {
 }
 
 impl Parse for RvalueNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
-        if input.is_empty() {
-            return Err(());
-        }
+        debug_assert!(!input.is_empty());
+        use Issue::*;
 
-        fn parse_primary_expressions(input: &[Token]) -> Result<Vec<TokenOrRvalueNode>, ()> {
+        fn parse_primary_expressions(
+            input: &[Token]
+        ) -> Result<Vec<TokenOrRvalueNode>, Vec<Issue>> {
             enum TokenOrPrimaryExpression {
                 Token(Token),
                 PrimaryExpression(PrimaryExpressionAndPos),
@@ -206,32 +210,27 @@ impl Parse for RvalueNode {
                 }
             }
 
-            impl TryFrom<TokenOrPrimaryExpression> for TokenOrRvalueNode {
-                type Error = ();
-
-                fn try_from(
-                    x: TokenOrPrimaryExpression
-                ) -> Result<Self, Self::Error> {
+            impl From<TokenOrPrimaryExpression> for TokenOrRvalueNode {
+                fn from(x: TokenOrPrimaryExpression) -> Self {
                     if x.is_lvalue() {
                         let lvalue_node = LvalueNode::try_from(x).unwrap();
 
-                        return Ok(TokenOrRvalueNode::RvalueNode(
+                        return TokenOrRvalueNode::RvalueNode(
                             RvalueNode {
                                 position: lvalue_node.position,
                                 rvalue: Box::new(Rvalue::Lvalue(lvalue_node)),
                             }
-                        ));
+                        );
                     }
 
                     match x {
-                        TokenOrPrimaryExpression::Token(t) =>
-                            Ok(TokenOrRvalueNode::Token(t)),
+                        TokenOrPrimaryExpression::Token(t) => TokenOrRvalueNode::Token(t),
 
                         TokenOrPrimaryExpression::PrimaryExpression(
                             prim_expr_and_pos
                         ) => {
                             let rvalue_node = RvalueNode::from(prim_expr_and_pos);
-                            Ok(TokenOrRvalueNode::RvalueNode(rvalue_node))
+                            TokenOrRvalueNode::RvalueNode(rvalue_node)
                         }
                     }
                 }
@@ -241,7 +240,7 @@ impl Parse for RvalueNode {
 
             let mut i: usize = 0;
             while let Some(t) = input.get(i) {
-                let pos = t.pos.clone();
+                let pos = t.pos;
 
                 match &t.token {
                     WrappedToken::Name(name) => {
@@ -265,7 +264,7 @@ impl Parse for RvalueNode {
 
                     WrappedToken::Bracket(br) => {
                         if br.bracket_type == token::BracketType::Curly {
-                            return Err(());
+                            return Err(vec![UnexpectedToken(pos)]);
                         }
 
                         let last_prim_expr_and_pos =
@@ -274,7 +273,7 @@ impl Parse for RvalueNode {
                                     Some(
                                         if let TokenOrPrimaryExpression::PrimaryExpression(
                                             prim_expr_and_pos
-                                        ) = toks_or_prim_or_br_exprs.pop().ok_or(())? {
+                                        ) = toks_or_prim_or_br_exprs.pop().unwrap() {
                                             prim_expr_and_pos
                                         } else {
                                             unreachable!()
@@ -325,7 +324,7 @@ impl Parse for RvalueNode {
                                 )
                             );
                         } else {  // not_a_prim_expr [ ... ] | not_a_prim_expr ( ... , ... )
-                            return Err(());
+                            return Err(vec![ExpectedPrimaryExpr(input[i - adv].pos)]);
                         }
 
                         continue;
@@ -333,14 +332,14 @@ impl Parse for RvalueNode {
                     WrappedToken::Colon | WrappedToken::QuestionMark | WrappedToken::Operator(_) =>
                         toks_or_prim_or_br_exprs.push(
                             TokenOrPrimaryExpression::Token(t.clone())),
-                    _ => return Err(()),
+                    _ => return Err(vec![UnexpectedToken(t.pos)]),
                 }
                 i += 1;
             }
 
             let mut res = vec![];
             for x in toks_or_prim_or_br_exprs {
-                res.push(TokenOrRvalueNode::try_from(x)?);
+                res.push(TokenOrRvalueNode::from(x));
             }
             Ok(res)
         }
@@ -349,7 +348,7 @@ impl Parse for RvalueNode {
 
         fn parse_unary_operators_and_reverse(
             mut input: Vec<TokenOrRvalueNode>
-        ) -> Result<Vec<TokenOrRvalueNode>, ()> {
+        ) -> Result<Vec<TokenOrRvalueNode>, Vec<Issue>> {
             fn op_is_not_unary(op: Operator) -> bool {
                 match op {
                     Operator::Binary(_) | Operator::Assign(_) => true,
@@ -463,27 +462,34 @@ impl Parse for RvalueNode {
                 op_and_pos: (Operator, TokenPos),
                 vec: &mut Vec<TokenOrRvalueNode>,
                 prefix_or_postfix: PrefixOrPostfix,
-            ) -> Result<RvalueNode, ()> {
-                let (op, _) = op_and_pos;
-                if let Some(
-                    TokenOrRvalueNode::RvalueNode(rvalue_node)
-                ) = vec.last() {
-                    if unary_op_can_be_applied(op,
-                                               rvalue_node,
-                                               prefix_or_postfix) {
-                        let op_node = apply_unary_op(
-                            op_and_pos,
-                            if let Some(
-                                TokenOrRvalueNode::RvalueNode(rvalue_node)
-                            ) = vec.pop() {
-                                rvalue_node
-                            } else {
-                                unreachable!()
-                            }, prefix_or_postfix);
-                        return Ok(op_node);
+            ) -> Result<RvalueNode, Issue> {
+                let (op, op_pos) = op_and_pos;
+                match vec.last() {
+                    Some(
+                        TokenOrRvalueNode::RvalueNode(rvalue_node)
+                    ) => {
+                        if unary_op_can_be_applied(op,
+                                                   rvalue_node,
+                                                   prefix_or_postfix) {
+                            let op_node = apply_unary_op(
+                                op_and_pos,
+                                if let Some(
+                                    TokenOrRvalueNode::RvalueNode(rvalue_node)
+                                ) = vec.pop() {
+                                    rvalue_node
+                                } else {
+                                    unreachable!()
+                                }, prefix_or_postfix);
+                            Ok(op_node)
+                        } else {
+                            Err(OpCannotBeApplied { op_pos, expr_pos: Some(rvalue_node.position) })
+                        }
                     }
+                    Some(TokenOrRvalueNode::Token(t)) => {
+                        Err(OpCannotBeApplied { op_pos, expr_pos: Some(t.pos) })
+                    }
+                    None => Err(OpCannotBeApplied { op_pos, expr_pos: None })
                 }
-                Err(())
             }
 
             let mut res_reversed = vec![];
@@ -517,29 +523,38 @@ impl Parse for RvalueNode {
                                 }
 
                                 let op_node = (|| {
+                                    let mut errors = vec![];
                                     if op_may_be_prefix(op) {
                                         let prefix_or_postfix = PrefixOrPostfix::Prefix;
-                                        if let Ok(
-                                            op_node
-                                        ) = try_to_apply_unary_op_to_last_elem_of_vec((op, t.pos.clone()),
-                                                                                      &mut res_reversed,
-                                                                                      prefix_or_postfix) {
-                                            return Ok(op_node);
+                                        match try_to_apply_unary_op_to_last_elem_of_vec((op,
+                                                                                         t.pos.clone()),
+                                                                                        &mut res_reversed,
+                                                                                        prefix_or_postfix) {
+                                            Ok(op_node) => {
+                                                return Ok(op_node);
+                                            }
+                                            Err(err) => {
+                                                errors.push(err)
+                                            }
                                         }
                                     }
 
                                     if op_may_be_postfix(op) {
                                         let prefix_or_postfix = PrefixOrPostfix::Postfix;
-                                        if let Ok(
-                                            op_node
-                                        ) = try_to_apply_unary_op_to_last_elem_of_vec((op, t.pos.clone()),
-                                                                                      &mut input,
-                                                                                      prefix_or_postfix) {
-                                            return Ok(op_node);
+                                        match try_to_apply_unary_op_to_last_elem_of_vec((op,
+                                                                                         t.pos.clone()),
+                                                                                        &mut input,
+                                                                                        prefix_or_postfix) {
+                                            Ok(op_node) => {
+                                                return Ok(op_node);
+                                            }
+                                            Err(err) => {
+                                                errors.push(err)
+                                            }
                                         }
                                     }
 
-                                    Err(())
+                                    Err(errors)
                                 })();
 
                                 res_reversed.push(TokenOrRvalueNode::RvalueNode(op_node?));
@@ -560,7 +575,7 @@ impl Parse for RvalueNode {
 
         fn rev_parse_binary_operators_except_assign(
             mut reversed_input: Vec<TokenOrRvalueNode>
-        ) -> Result<Vec<TokenOrRvalueNode>, ()> {
+        ) -> Result<Vec<TokenOrRvalueNode>, Vec<Issue>> {
             use std::collections::HashMap;
 
             use Operator::*;
@@ -644,13 +659,11 @@ impl Parse for RvalueNode {
 
             fn token_to_binary_operator(x: &Token) -> Option<Operator> {
                 if let Token { token: WrappedToken::Operator(op), .. } = x {
-                    Some(
-                        match op {
-                            Plus | Minus | Asterisk | Ampersand | Binary(_) => *op,
-                            Assign(_) => return None,
-                            _ => unreachable!()
-                        }
-                    )
+                    match op {
+                        Plus | Minus | Asterisk | Ampersand | Binary(_) => Some(*op),
+                        Assign(_) => None,
+                        _ => unreachable!()
+                    }
                 } else {
                     None
                 }
@@ -663,16 +676,20 @@ impl Parse for RvalueNode {
             fn apply_last_bin_op(
                 ops_and_positions: &mut Vec<(Operator, TokenPos)>,
                 operands: &mut Vec<RvalueNode>,
-            ) -> Result<RvalueNode, ()> {
-                let last_op_and_pos = ops_and_positions.pop();
-                if last_op_and_pos.is_none() {
-                    return Err(());
+            ) -> Result<RvalueNode, Vec<Issue>> {
+                let (op, pos) = ops_and_positions.pop().unwrap();
+
+                let rhs = operands.pop();
+                if rhs.is_none() {
+                    return Err(vec![Issue::NoOperandForOperator(op, pos, Some(Right))]);
                 }
+                let rhs = rhs.unwrap();
 
-                let (op, pos) = last_op_and_pos.unwrap();
-
-                let rhs = operands.pop().ok_or(())?;
-                let lhs = operands.pop().ok_or(())?;
+                let lhs = operands.pop();
+                if lhs.is_none() {
+                    return Err(vec![Issue::NoOperandForOperator(op, pos, Some(Left))]);
+                }
+                let lhs = lhs.unwrap();
 
                 Ok(RvalueNode {
                     position: pos,
@@ -692,18 +709,11 @@ impl Parse for RvalueNode {
                 })
             }
 
-            enum RvalueNodeOrUnit {
-                RvalueNode(RvalueNode),
-                Unit,
-            }
-
             fn free_ops_and_operands_stacks(
                 ops: &mut Vec::<(Operator, TokenPos)>,
                 operands: &mut Vec::<RvalueNode>,
-            ) -> Result<RvalueNodeOrUnit, ()> {
-                if ops.is_empty() && operands.is_empty() {
-                    return Ok(RvalueNodeOrUnit::Unit);
-                }
+            ) -> Result<RvalueNode, Vec<Issue>> {
+                debug_assert!(!ops.is_empty() || !operands.is_empty());
 
                 while let Some(_) = ops.last() {
                     let op_applied = apply_last_bin_op(ops, operands)?;
@@ -711,9 +721,9 @@ impl Parse for RvalueNode {
                 }
 
                 if operands.len() == 1 {
-                    Ok(RvalueNodeOrUnit::RvalueNode(operands.pop().unwrap()))
+                    Ok(operands.pop().unwrap())
                 } else {
-                    Err(())
+                    Err(vec![Issue::UnexpectedOperand(operands[1].position)])
                 }
             }
 
@@ -725,17 +735,10 @@ impl Parse for RvalueNode {
                         if let Some(op) = op {
                             bin_ops_and_positions.push((op, t.pos));
                         } else {
-                            if let Ok(ops_applied)
-                            = free_ops_and_operands_stacks(&mut bin_ops_and_positions,
-                                                           &mut operands) {
-                                if let RvalueNodeOrUnit::RvalueNode(
-                                    ops_applied
-                                ) = ops_applied {
-                                    res.push(TokenOrRvalueNode::RvalueNode(ops_applied));
-                                }
-                            } else {  // error while freeing the stacks
-                                return Err(());
-                            }
+                            let ops_applied
+                                = free_ops_and_operands_stacks(&mut bin_ops_and_positions,
+                                                               &mut operands)?;
+                            res.push(TokenOrRvalueNode::RvalueNode(ops_applied));
 
                             res.push(TokenOrRvalueNode::Token(t));
                         }
@@ -752,19 +755,15 @@ impl Parse for RvalueNode {
                                 None
                             };
 
-                        while let Some(curr_op) = bin_ops_and_positions.last() {
+                        while let Some((curr_op, _)) = bin_ops_and_positions.last() {
                             if let Some(next_op) = next_op {
                                 if bin_op_priority.get(&next_op)
-                                    > bin_op_priority.get(&curr_op.0) {
+                                    > bin_op_priority.get(curr_op) {
                                     break;
                                 } else {
-                                    if let Ok(op_applied)
-                                    = apply_last_bin_op(&mut bin_ops_and_positions,
-                                                        &mut operands) {
-                                        operands.push(op_applied);
-                                    } else {
-                                        return Err(());
-                                    }
+                                    let op_applied = apply_last_bin_op(&mut bin_ops_and_positions,
+                                                                       &mut operands)?;
+                                    operands.push(op_applied);
                                 }
                             } else {
                                 break;
@@ -774,11 +773,9 @@ impl Parse for RvalueNode {
                 }
             }
 
-            if let Ok(RvalueNodeOrUnit::RvalueNode(ops_applied))
-            = free_ops_and_operands_stacks(&mut bin_ops_and_positions,
-                                           &mut operands) {
-                res.push(TokenOrRvalueNode::RvalueNode(ops_applied));
-            }
+            let ops_applied = free_ops_and_operands_stacks(&mut bin_ops_and_positions,
+                                                           &mut operands)?;
+            res.push(TokenOrRvalueNode::RvalueNode(ops_applied));
 
             Ok(res)
         }
@@ -787,10 +784,8 @@ impl Parse for RvalueNode {
 
         fn parse_conditional_expressions_and_assignments(
             mut input: Vec<TokenOrRvalueNode>
-        ) -> Result<RvalueNode, ()> {
-            if input.is_empty() {
-                return Err(());
-            }
+        ) -> Result<RvalueNode, Vec<Issue>> {
+            debug_assert!(!input.is_empty());
 
             enum AssignOrRvalueNode {
                 Assign(Assign, TokenPos),
@@ -799,47 +794,74 @@ impl Parse for RvalueNode {
 
             fn parse_assignments(
                 mut input: VecDeque<AssignOrRvalueNode>
-            ) -> Result<RvalueNode, ()> {
-                if input.len() % 2 != 1 {  // the number of tokens is even
-                    return Err(());
-                }
+            ) -> Result<RvalueNode, Vec<Issue>> {
+                debug_assert!(!input.is_empty());
 
                 while input.len() > 1 {
-                    let rhs = input.pop_back().ok_or(())?;
-                    let assign = input.pop_back().ok_or(())?;
-                    let lhs = input.pop_back().ok_or(())?;
-
-                    if let AssignOrRvalueNode::RvalueNode(RvalueNode { rvalue, .. }) = lhs {
-                        if let Rvalue::Lvalue(lhs) = &*rvalue {
-                            if let AssignOrRvalueNode::Assign(assign,
-                                                              position) = assign {
-                                if let AssignOrRvalueNode::RvalueNode(rhs) = rhs {
-                                    input.push_back(AssignOrRvalueNode::RvalueNode(
-                                        RvalueNode {
-                                            position,
-                                            rvalue: Box::new(Rvalue::Assign {
-                                                lhs: lhs.clone(),
-                                                assign,
-                                                rhs,
-                                            }),
-                                        }
-                                    ));
-
-                                    continue;
-                                }
-                            }
+                    let rhs
+                        = match input.pop_back() {
+                        Some(AssignOrRvalueNode::RvalueNode(rv)) => {
+                            rv
                         }
-                    }
+                        Some(AssignOrRvalueNode::Assign(_, pos)) => {
+                            return Err(vec![UnexpectedToken(pos)]);
+                        }
+                        _ => unreachable!()
+                    };
 
-                    return Err(());
+                    let (assign, assign_pos)
+                        = match input.pop_back() {
+                        Some(AssignOrRvalueNode::Assign(assign, assign_pos)) => {
+                            (assign, assign_pos)
+                        }
+                        Some(AssignOrRvalueNode::RvalueNode(rv)) => {
+                            return Err(vec![ExpectedTokenNotFound(rv.position)]);
+                        }
+                        _ => unreachable!()
+                    };
+
+                    let (lhs_rv, lhs_pos)
+                        = match input.pop_back() {
+                        Some(AssignOrRvalueNode::RvalueNode(
+                                 RvalueNode {
+                                     rvalue: lhs_rv,
+                                     position: lhs_pos
+                                 })) => {
+                            (lhs_rv, lhs_pos)
+                        }
+                        None => {
+                            return Err(vec![NoOperandForOperator(Operator::Assign(assign),
+                                                                 assign_pos,
+                                                                 Some(LeftOrRight::Left))]);
+                        }
+                        Some(AssignOrRvalueNode::Assign(_, pos)) => {
+                            return Err(vec![UnexpectedToken(pos)]);
+                        }
+                    };
+
+                    if let Rvalue::Lvalue(lhs) = *lhs_rv {
+                        input.push_back(AssignOrRvalueNode::RvalueNode(
+                            RvalueNode {
+                                position: assign_pos,
+                                rvalue: Box::new(Rvalue::Assign {
+                                    lhs,
+                                    assign,
+                                    rhs,
+                                }),
+                            }
+                        ));
+                    } else {
+                        return Err(vec![NotAnLvalue(lhs_pos)]);
+                    }
                 }
 
-                return if let AssignOrRvalueNode::RvalueNode(
-                    single_rv_node
-                ) = input.pop_back().ok_or(())? {
-                    Ok(single_rv_node)
-                } else {
-                    Err(())
+                return match input.pop_back().unwrap() {
+                    AssignOrRvalueNode::RvalueNode(single_rv_node) => {
+                        Ok(single_rv_node)
+                    }
+                    AssignOrRvalueNode::Assign(_, pos) => {
+                        Err(vec![UnexpectedToken(pos)])
+                    }
                 };
             }
 
@@ -861,25 +883,38 @@ impl Parse for RvalueNode {
                         match t.token {
                             WrappedToken::Colon => {
                                 if buff.get_mut().len() != 1 {
-                                    return Err(());
+                                    let len = buff.get_mut().len();
+                                    match len {
+                                        // 0 => return Err(EmptyOnTrue { question_mark_pos: TokenPos {}, colon_pos: TokenPos {} }),
+                                        _ => (),
+                                    }
+                                    todo!()
                                 }
 
-                                let next_rvalue = buff.get_mut().pop_front().ok_or(())?;
-                                if let AssignOrRvalueNode::RvalueNode(
-                                    rv_node
-                                ) = next_rvalue {
-                                    on_false_stack.push((rv_node, t.pos));
-                                } else {
-                                    return Err(());
+                                let next_rvalue = buff.get_mut().pop_front().unwrap();
+                                match next_rvalue {
+                                    AssignOrRvalueNode::RvalueNode(
+                                        rv_node
+                                    ) => {
+                                        on_false_stack.push((rv_node, t.pos));
+                                    }
+                                    AssignOrRvalueNode::Assign(_, pos) => {
+                                        return Err(vec![UnexpectedToken(pos)]);
+                                    }
                                 }
                             }
 
                             WrappedToken::QuestionMark => {
                                 if input.is_empty() {  // ? ... : ...
-                                    return Err(());
+                                    return Err(vec![NoCondition(t.pos)]);
                                 }
 
-                                let (on_false, colon_pos) = on_false_stack.pop().ok_or(())?;
+                                let on_false_and_colon_pos = on_false_stack.pop();
+                                if on_false_and_colon_pos.is_none() {
+                                    return Err(vec![NoColonInCond(t.pos)]);
+                                }
+
+                                let (on_false, colon_pos) = on_false_and_colon_pos.unwrap();
                                 let on_true = parse_assignments(buff.take())?;
 
                                 if let Some(
@@ -906,24 +941,35 @@ impl Parse for RvalueNode {
             }
 
             if !on_false_stack.is_empty() {
-                return Err(());
+                let (_, on_false_pos) = on_false_stack.pop().unwrap();
+                return Err(vec![UnexpectedToken(on_false_pos)]);
             }
 
-            if input.is_empty() {
-                return parse_assignments(buff.take());
+            match input.len() {
+                0 => {
+                    return parse_assignments(buff.take());
+                }
+                1 => {
+                    match input.pop() {
+                        Some(
+                            TokenOrRvalueNode::RvalueNode(single_rv_node)
+                        ) => {
+                            Ok(single_rv_node)
+                        }
+                        Some(TokenOrRvalueNode::Token(t)) => {
+                            Err(vec![UnexpectedToken(t.pos)])
+                        }
+                        _ => unreachable!()
+                    }
+                }
+                _ => {
+                    return Err(vec![UnexpectedToken(
+                        match input.pop().unwrap() {
+                            TokenOrRvalueNode::Token(t) => t.pos,
+                            TokenOrRvalueNode::RvalueNode(rv) => rv.position,
+                        })]);
+                }
             }
-
-            if input.len() != 1 {
-                return Err(());
-            }
-
-            return if let Some(
-                TokenOrRvalueNode::RvalueNode(single_rv_node)
-            ) = input.pop() {
-                Ok(single_rv_node)
-            } else {
-                Err(())
-            };
         }
 
         let res = parse_conditional_expressions_and_assignments(res)?;

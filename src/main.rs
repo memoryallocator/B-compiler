@@ -56,27 +56,16 @@ fn main() {
     };
 
     let ast_to_scopes_mapping = processor.run(&tokens, &mut issues);
-    let scope_table = ast_to_scopes_mapping.unwrap_or_else(
-        |()| {
-            eprintln!("Cannot proceed");
-            process::exit(1);
-        });
-
     let mut at_least_1_error = false;
     for issue in issues {
         use Issue::*;
         let error = match issue {
-            BracketNotOpened(_) | BracketNotClosed(_)
-            | EmptyTokenStream | ParsingError
-            | NameNotDefined { .. } | NameRedefined { .. } | NameRedeclared { .. }
-            | VecSizeIsNotANumber { .. } | LiteralTooLong(_)
-            | UnexpectedKeyword(_) | CaseEncounteredTwice(_)
-            | NameHasNoRvalue(_, _) | ExternSymbolNotFound { .. }
-            | NoMainFn => true,
-            VecWithNoSizeAndInits(_, _) | VecTooManyIvals { .. }
+            VecWithNoSizeAndInits(..) | VecTooManyIvals { .. }
             | DeclShadowsGlobalDef { .. } | UnnecessaryImport { .. }
             | DeclShadowsFnParameter { .. } | DeclShadowsPrevious { .. }
             | InvalidParameterCount { .. } => false,
+
+            _ => true,
         };
         eprintln!("{}: {}", if error { "error" } else { "warning" }, issue);
         at_least_1_error |= error;
@@ -85,6 +74,7 @@ fn main() {
         println!("There were more than 0 errors. Terminating");
         process::exit(1);
     }
+    let scope_table = ast_to_scopes_mapping.unwrap();
 
     let mut processor
         = intermediate_code_generator::IntermediateCodeGenerator::new(compiler_options,

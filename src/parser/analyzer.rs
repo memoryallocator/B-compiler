@@ -126,8 +126,8 @@ impl<'a> Analyzer<'a> {
                                 Constant::Number(nmb) => *nmb,
                                 Constant::String(s) => {
                                     issues.push(VecSizeIsNotANumber {
-                                        vec_def: (name.clone(), pos),
-                                        size: s.clone(),
+                                        name: name.clone(),
+                                        pos,
                                     });
                                     0
                                 }
@@ -255,8 +255,8 @@ impl<'a> Analyzer<'a> {
                                     Constant::Number(nmb) => Some(nmb),
                                     Constant::String(s) => {
                                         issues.push(Issue::VecSizeIsNotANumber {
-                                            vec_def: (name.clone(), pos),
-                                            size: s.clone(),
+                                            name: name.clone(),
+                                            pos,
                                         });
                                         None
                                     }
@@ -556,6 +556,7 @@ impl<'a> Analyzer<'a> {
                     self.process_rvalue(goto, local_scope, issues);
                 }
                 FlatNode::Switch(var) => {
+                    breakable_stmt_stack.push(node.pos);
                     self.process_rvalue(var, local_scope, issues);
                     cases_stack.push(HashSet::new());
                 }

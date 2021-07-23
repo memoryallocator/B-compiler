@@ -162,7 +162,7 @@ impl MachineCodeGenerator {
                 end while
 	            sub rsp, {shadow_space_size}",
                       new = call_conv.supporting_registers[0],
-                      prev = call_conv.supporting_registers[0],
+                      prev = call_conv.supporting_registers[1],
                       n = n,
                       word_size = word_size,
                       reg_for_calls = reg_for_calls,

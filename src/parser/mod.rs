@@ -11,6 +11,7 @@ use crate::parser::ast::*;
 use flat_ast::{FlatNodeAndPos, FlattenNode};
 
 use crate::config::*;
+use Issue::*;
 use crate::tokenizer::token;
 use token::*;
 
@@ -21,93 +22,93 @@ pub(crate) mod analyzer;
 pub(crate) type FlatAst = Vec<FlatNodeAndPos>;
 
 pub(crate) trait Parse {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized;
 }
 
 pub(crate) trait ParseExact: Parse {
-    fn parse_exact(input: &[Token]) -> Result<Self, ()>
+    fn parse_exact(input: &[Token]) -> Result<Self, Vec<Issue>>
         where Self: Sized {
-        if let Ok((obj, adv)) = Self::parse(&input) {
-            if adv == input.len() {
-                return Ok(obj);
-            }
+        let (obj, adv) = Self::parse(&input)?;
+        if adv == input.len() {
+            Ok(obj)
+        } else {
+            Err(vec![Issue::FailedToParseExact(input[0].pos)])
         }
-        Err(())
     }
 }
 
 impl Parse for Ival {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
-        return Ok((
-            if let Some(t) = input.first() {
-                match &t.token {
-                    WrappedToken::Name(name) => Ival::Name(name.clone(), t.pos),
+        let t = &input[0];
+        Ok((match &t.token {
+            WrappedToken::Name(name) => Ival::Name(name.clone(), t.pos),
 
-                    WrappedToken::Constant(_) =>
-                        Ival::Constant(ConstantNode::try_from(t).unwrap()),
-                    _ => return Err(()),
+            WrappedToken::Constant(_) => {
+                match ConstantNode::try_from(t) {
+                    Ok(c) => {
+                        Ival::Constant(c)
+                    }
+                    Err(err) => {
+                        return Err(vec![err]);
+                    }
                 }
-            } else {
-                return Err(());
-            }, 1));
+            }
+            _ => return Err(vec![UnexpectedToken(t.pos)]),
+        }, 1))
     }
 }
 
 impl Parse for ConstantNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
-        if let Some(t) = input.get(0) {
-            if let Ok(constant) = ConstantNode::try_from(t) {
-                return Ok((constant, 1));
-            }
+        let t = &input[0];
+        if let Ok(constant) = ConstantNode::try_from(t) {
+            return Ok((constant, 1));
         }
-        Err(())
+        Err(vec![ParsingError(t.pos)])
     }
 }
 
 impl ParseExact for ConstantNode {}
 
 impl Parse for VariableDefinitionNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()> {
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>> {
         let toks_trim: Vec<&Token> = input.into_iter()
             .take_while(|t| t.token != WrappedToken::Semicolon)
             .collect();
 
         if toks_trim.len() == input.len() {  // no semicolon found
-            return Err(());
+            return Err(vec![ExpectedTokenNotFound(toks_trim.last().unwrap().pos)]);
         }
-        return
-            Ok((
-                if let Some(
-                    Token {
-                        token: WrappedToken::Name(name),
-                        pos: name_pos,
-                    }) = toks_trim.get(0) {
-                    let name = name.clone();
+        return if let Token {
+            token: WrappedToken::Name(name),
+            pos: name_pos,
+        } = toks_trim[0] {
+            let name = name.clone();
 
-                    VariableDefinitionNode {
-                        position: name_pos.clone(),
-                        name,
-                        initial_value: match toks_trim.get(1) {
-                            None => None,
-                            Some(&t) =>
-                                if let Ok((ival, _)) = Ival::parse(&[t.clone()]) {
-                                    Some(ival)
-                                } else {
-                                    return Err(());
-                                }
-                        },
-                    }
-                } else {
-                    return Err(());
-                }, toks_trim.len() + 1));
+            Ok((VariableDefinitionNode {
+                position: name_pos.clone(),
+                name,
+                initial_value: match toks_trim.get(1) {
+                    None => None,
+                    Some(&t) =>
+                        if let Ok((ival, _)) = Ival::parse(&[t.clone()]) {
+                            Some(ival)
+                        } else {
+                            return Err(vec![ExpectedTokenNotFound(t.pos)]);  // expected ival
+                        }
+                },
+            }, toks_trim.len() + 1))
+        } else {
+            Err(vec![UnexpectedToken(toks_trim[0].pos)])
+        };
     }
 }
 
 impl Parse for VectorDefinitionNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
         let toks_trim: Vec<&Token> =
             input
@@ -116,13 +117,13 @@ impl Parse for VectorDefinitionNode {
                 .collect();
 
         if toks_trim.len() == input.len() {  // no semicolon found
-            return Err(());
+            return Err(vec![ExpectedTokenNotFound(toks_trim.last().unwrap().pos)]);
         }
 
         {
             let minimal_len = 3;  // name [ ]
             if toks_trim.len() < minimal_len {
-                return Err(());
+                return Err(vec![StmtTooShort(toks_trim[0].pos)]);
             }
         }
 
@@ -143,11 +144,10 @@ impl Parse for VectorDefinitionNode {
                     let name = name.clone();
                     let left_br_idx = name_and_left_br_len - 1;
 
-                    let right_bracket_idx
-                        = get_right_bracket_index(input, left_br_idx).ok_or(())?;
+                    let right_bracket_idx = get_right_bracket_index(input, left_br_idx);
 
                     if right_bracket_idx - left_br_idx > 2 {  // name [ ... ... ]
-                        return Err(());
+                        return Err(vec![UnexpectedToken(input[left_br_idx + 2].pos)]);
                     }
 
                     let specified_size =
@@ -158,7 +158,8 @@ impl Parse for VectorDefinitionNode {
                                 &input[left_br_idx + 1..right_bracket_idx]) {
                                 Some(size)
                             } else {
-                                return Err(());
+                                let size = &input[left_br_idx + 1];
+                                return Err(vec![VecSizeIsNotANumber { name, pos: size.pos }]);
                             }
                         };
 
@@ -187,7 +188,7 @@ impl Parse for VectorDefinitionNode {
                                 None => {  // ival $
                                     break;
                                 }
-                                _ => return Err(()),
+                                Some(t) => return Err(vec![UnexpectedToken(t.pos)]),
                             }
                             next_ival_idx = first_ival_idx + 2 * initial_values.len();
                         }
@@ -200,71 +201,58 @@ impl Parse for VectorDefinitionNode {
                         }
                     }
                 }
-                _ => return Err(())
+                _ => return Err(vec![ExpectedTokenNotFound(input[1].pos)])
             };
         Ok((node, toks_trim.len() + 1))
     }
 }
 
-fn parse_name_list(
-    tokens: &[Token],
-    allow_duplicates: bool,
-) -> Result<Vec<(String, TokenPos)>, ()> {
+fn parse_comma_separated_list(tokens: &[Token]) -> Result<Vec<(String, TokenPos)>, Vec<Issue>> {
     if tokens.is_empty() {
         return Ok(Default::default());
     }
+    let mut res = Vec::new();
+    let err =
+        loop {
+            let name_idx = res.len() * 2;
+            let name_pos;
+            let name;
+            let comma_idx;
 
-    let mut res = MultiMap::new();
-    loop {
-        let name_idx = res.key_count() * 2;
-        let name_pos;
-        let name;
-        let comma_idx;
-
-        if let Some(
-            Token { token: WrappedToken::Name(tok_name), pos }
-        ) = tokens.get(name_idx) {
-            name_pos = *pos;
-            name = tok_name.clone();
-            comma_idx = name_idx + 1;
-        } else {
-            return Err(());  // the input is not empty, but no name found
-        }
-
-        if res.contains_key(&name) && !allow_duplicates {
-            return Err(());  // duplicate found
-        }
-        res.insert(name, (res.key_count(), name_pos));
-
-        match tokens.get(comma_idx) {
-            Some(Token { token: WrappedToken::Comma, .. }) => (),  // OK, matched "name ,"
-            None => {  // end of input, matched "[name_list ,] name"
-                let mut res = res.extract_inner()
-                    .into_iter()
-                    .map(|(k, v)|
-                        v.into_iter()
-                            .map(|x| (k.clone(), x))
-                            .collect::<Vec<(String, (usize, TokenPos))>>())
-                    .flatten()
-                    .collect::<Vec<(String, (usize, TokenPos))>>();
-
-                res.sort_unstable_by(|(_, (lhs_order, _)), (_, (rhs_order, _))|
-                    lhs_order.partial_cmp(rhs_order).unwrap());
-
-                return Ok(res.into_iter()
-                    .map(|(name, (_, pos))| (name, pos))
-                    .collect());
+            match tokens.get(name_idx) {
+                Some(
+                    Token { token: WrappedToken::Name(tok_name), pos }
+                ) => {
+                    name_pos = *pos;
+                    name = tok_name.clone();
+                    comma_idx = name_idx + 1;
+                }
+                Some(t) => {
+                    break UnexpectedToken(t.pos);
+                }
+                None => {
+                    // the input is not empty, but no name found
+                    break ExpectedTokenNotFound(tokens[name_idx - 1].pos);
+                }
             }
-            Some(_) => return Err(()),  // the next symbol is not a comma
-        }
-    }
+            res.push((name, name_pos));
+
+            match tokens.get(comma_idx) {
+                Some(Token { token: WrappedToken::Comma, .. }) => (),  // OK, matched "name ,"
+                None => {  // end of input, matched "[name_list ,] name"
+                    return Ok(res);
+                }
+                Some(t) => break UnexpectedToken(t.pos),  // the next symbol is not a comma
+            }
+        };
+    Err(vec![err])
 }
 
 impl Parse for FunctionDefinitionNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
         if input.len() < 4 {  // name ( ) ;
-            return Err(());
+            return Err(vec![StmtTooShort(input[0].pos)]);
         }
 
         match &input[..2] {
@@ -281,47 +269,32 @@ impl Parse for FunctionDefinitionNode {
             }] => {
                 let mut toks_consumed: usize = 2;
                 let left_br_idx = 1;
-                let right_bracket_index
-                    = get_right_bracket_index(input, left_br_idx).ok_or(())?;
+                let right_bracket_index = get_right_bracket_index(input, left_br_idx);
 
-                let parameter_names =
-                    if let Ok(names) = parse_name_list(&input[toks_consumed..right_bracket_index],
-                                                       false) {
-                        names
-                    } else {
-                        return Err(());
-                    };
+                let parameter_names
+                    = parse_comma_separated_list(&input[toks_consumed..right_bracket_index])?;
 
                 toks_consumed = right_bracket_index + 1;
-                return if let Ok(
-                    (stmt, adv)
-                ) = StatementNode::parse(&input[toks_consumed..]) {
-                    let name = name.clone();
-                    toks_consumed += adv;
-                    Ok((
-                        FunctionDefinitionNode {
-                            position: name_pos.clone(),
-                            name,
-                            parameters: parameter_names,
-                            body: stmt,
-                        }, toks_consumed
-                    ))
-                } else {
-                    Err(())
-                };
+                let (stmt, adv) = StatementNode::parse(&input[toks_consumed..])?;
+                let name = name.clone();
+                toks_consumed += adv;
+                Ok((
+                    FunctionDefinitionNode {
+                        position: name_pos.clone(),
+                        name,
+                        parameters: parameter_names,
+                        body: stmt,
+                    }, toks_consumed
+                ))
             }
-            _ => Err(())
+            _ => Err(vec![ExpectedTokenNotFound(input[1].pos)])
         }
     }
 }
 
 impl Parse for AutoDeclaration {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
-        if input.is_empty() {
-            return Err(());
-        }
-
         if input.len() >= 4 {
             if let [
             Token { token: WrappedToken::Name(name), .. },
@@ -361,30 +334,29 @@ impl Parse for AutoDeclaration {
         }
 
         if let Token { token: WrappedToken::Name(name), pos } = &input[0] {
-            let name = name.clone();
-
-            return Ok((AutoDeclaration {
+            Ok((AutoDeclaration {
                 position: *pos,
-                name,
+                name: name.clone(),
                 size_if_vector: None,
-            }, 1));
+            }, 1))
+        } else {
+            Err(vec![ExpectedTokenNotFound(input[0].pos)])
         }
-        Err(())
     }
 }
 
-fn get_semicolon_pos(tokens: &[Token]) -> Option<usize> {
+fn get_semicolon_pos(tokens: &[Token]) -> Result<usize, Vec<Issue>> {
     tokens.into_iter()
         .position(|c| c.token == WrappedToken::Semicolon)
+        .ok_or_else(|| vec![Issue::ExpectedTokenNotFound(tokens.last().unwrap().pos)])
 }
 
 impl Parse for AutoDeclarationNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
         if input.len() < 4 {  // auto name ; null_stmt
-            return Err(());
+            return Err(vec![StmtTooShort(input[0].pos)]);
         }
-
         return if let Some(
             Token {
                 token: WrappedToken::ReservedName(ReservedName::DeclarationSpecifier(
@@ -392,91 +364,63 @@ impl Parse for AutoDeclarationNode {
                 pos, ..
             }
         ) = input.first() {
-            let semicolon_pos =
-                if let Some(sp_minus_one) = get_semicolon_pos(&input[1..]) {
-                    sp_minus_one + 1
-                } else {
-                    return Err(());
-                };
+            let sp_minus_one = get_semicolon_pos(&input[1..])?;
+            let semicolon_pos = sp_minus_one + 1;
 
             let next_statement_starts_at = semicolon_pos + 1;
             if input.len() <= next_statement_starts_at {
-                return Err(());
+                return Err(vec![NoNextStmtAfterDecl(input.last().unwrap().pos)]);
             }
 
-            let declarations;
-            if let Ok(decls) = get_auto_decl_list(
-                &input[1..semicolon_pos]) {
-                declarations = decls;
-            } else {
-                return Err(());
-            }
-
-            if let Ok(
-                (stmt_node, adv)
-            ) = StatementNode::parse(&input[next_statement_starts_at..]) {
-                Ok((AutoDeclarationNode {
-                    position: pos.clone(),
-                    declarations,
-                    next_statement: stmt_node,
-                }, next_statement_starts_at + adv))
-            } else {
-                Err(())
-            }
+            let declarations = get_auto_decl_list(&input[1..semicolon_pos])?;
+            let (stmt_node, adv) = StatementNode::parse(&input[next_statement_starts_at..])?;
+            Ok((AutoDeclarationNode {
+                position: pos.clone(),
+                declarations,
+                next_statement: stmt_node,
+            }, next_statement_starts_at + adv))
         } else {
-            Err(())
+            Err(vec![ExpectedTokenNotFound(input[0].pos)])
         };
     }
 }
 
-fn get_auto_decl_list(tokens: &[Token]) -> Result<Vec<AutoDeclaration>, ()> {
-    if tokens.is_empty() {
-        return Err(());
-    }
-
-    let mut res = HashMap::<String, (AutoDeclaration, usize)>::new();
+fn get_auto_decl_list(tokens: &[Token]) -> Result<Vec<AutoDeclaration>, Vec<Issue>> {
+    let mut res = Vec::new();
 
     let mut i: usize = 0;
     while i < tokens.len() {
-        while let Ok(
-            (auto_decl, adv)
-        ) = AutoDeclaration::parse(&tokens[i..]) {
-            if let Some(_prev_decl) = res.insert(auto_decl.name.clone(),
-                                                 (auto_decl, res.len())) {
-                return Err(());
+        match AutoDeclaration::parse(&tokens[i..]) {
+            Ok((auto_decl, adv)) => {
+                res.push(auto_decl);
+                i += adv;
+
+                match tokens.get(i) {
+                    None => {
+                        return Ok(res);
+                    }
+                    Some(Token { token: WrappedToken::Comma, .. }) => {
+                        i += 1;
+                        continue;
+                    }
+                    Some(t) => {
+                        return Err(vec![UnexpectedToken(t.pos)]);
+                    }
+                }
             }
-            i += adv;
-
-            match tokens.get(i) {
-                None => {
-                    let mut res = res.into_iter()
-                        .map(|(_, v)| v)
-                        .collect::<Vec<(AutoDeclaration, usize)>>();
-
-                    res.sort_unstable_by(|(_, lhs_order), (_, rhs_order)|
-                        lhs_order.partial_cmp(rhs_order).unwrap());
-
-                    return Ok(res.into_iter()
-                        .map(|(auto_decl, _)| auto_decl)
-                        .collect());
-                }
-                Some(Token { token: WrappedToken::Comma, .. }) => {
-                    i += 1;
-                    continue;
-                }
-                _ => return Err(())
+            Err(err) => {
+                return Err(err);
             }
         }
-        return Err(());
     }
     unreachable!()
 }
 
 impl Parse for ExternDeclarationNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
         if input.len() < 4 {  // extrn name ; null_stmt
-            return Err(());
+            return Err(vec![StmtTooShort(input[0].pos)]);
         }
 
         use token::DeclarationSpecifier::Extrn;
@@ -486,102 +430,90 @@ impl Parse for ExternDeclarationNode {
                 token: WrappedToken::ReservedName(ReservedName::DeclarationSpecifier(Extrn)), ..
             }
         ) = input.first() {
-            let semicolon_pos =
-                if let Some(sp_minus_one) = get_semicolon_pos(&input[1..]) {
-                    sp_minus_one + 1
-                } else {
-                    return Err(());
-                };
+            let sp_minus_one = get_semicolon_pos(&input[1..])?;
+            let semicolon_pos = sp_minus_one + 1;
 
-            let names =
-                if let Ok(names) = parse_name_list(&input[1..semicolon_pos], true) {
-                    names
-                } else {
-                    return Err(());
-                };
+            let names = parse_comma_separated_list(&input[1..semicolon_pos])?;
 
             let next_statement_starts_at = semicolon_pos + 1;
             if input.len() <= next_statement_starts_at {
-                return Err(());
+                return Err(vec![NoNextStmtAfterDecl(input.last().unwrap().pos)]);
             }
 
-            if let Ok(
-                (next_stmt, adv)
-            ) = StatementNode::parse(&input[next_statement_starts_at..]) {
-                return Ok((ExternDeclarationNode {
-                    position: input[0].pos.clone(),
-                    names,
-                    next_statement: next_stmt,
-                }, next_statement_starts_at + adv));
-            }
-        };
-
-        Err(())
+            let (next_stmt, adv) = StatementNode::parse(&input[next_statement_starts_at..])?;
+            Ok((ExternDeclarationNode {
+                position: input[0].pos.clone(),
+                names,
+                next_statement: next_stmt,
+            }, next_statement_starts_at + adv))
+        } else {
+            Err(vec![ExpectedTokenNotFound(input.first().unwrap().pos)])
+        }
     }
 }
 
 impl Parse for LabelDeclarationNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
+        let pos = input[0].pos;
         if input.len() < 3 {
-            return Err(());
+            return Err(vec![StmtTooShort(pos)]);
         }
 
         return if let [
         Token { token: WrappedToken::Name(name), .. },
         Token { token: WrappedToken::Colon, .. }
         ] = &input[..2] {
-            let name = name.clone();
-
-            if let Ok((next_stmt, adv)) = StatementNode::parse(&input[2..]) {
-                Ok((LabelDeclarationNode {
-                    position: input[0].pos.clone(),
-                    label_name: name,
-                    next_statement: next_stmt,
-                }, 2 + adv))
-            } else {
-                Err(())
-            }
+            let (next_stmt, adv) = StatementNode::parse(&input[2..])?;
+            Ok((LabelDeclarationNode {
+                position: pos,
+                label_name: name.clone(),
+                next_statement: next_stmt,
+            }, 2 + adv))
         } else {
-            Err(())
+            Err(vec![ExpectedTokenNotFound(input[1].pos)])
         };
     }
 }
 
 fn extract_bracketed_rvalue(
     tokens: &[Token],
-    bracket_type: BracketType,
-) -> Result<(RvalueNode, usize), ()> {
-    return if let Some(
-        Token { token: WrappedToken::Bracket(br), .. }) = tokens.first() {
-        if br.bracket_type != bracket_type {
-            return Err(());
-        }
+    br_type: BracketType,
+) -> Result<(RvalueNode, usize), Vec<Issue>> {
+    let first = &tokens[0];
+    if let Token {
+        token: WrappedToken::Bracket(
+            Bracket {
+                left_or_right: LeftOrRight::Left, ..
+            }
+        ), pos
+    } = first {
         let br_expr = extract_bracketed_expression(tokens)?;
         if br_expr.is_empty() {
-            return Err(());
+            return Err(vec![EmptyBracketedExpr(*pos)]);
         }
         Ok((RvalueNode::parse_exact(br_expr)?, 1 + br_expr.len() + 1))
     } else {
-        Err(())
-    };
+        Err(vec![UnexpectedToken(tokens.first().unwrap().pos)])
+    }
 }
 
 impl ParseExact for RvalueNode {}
 
 impl Parse for SwitchNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
         if input.len() < 5 {  // switch ( rvalue ) null_stmt
-            return Err(());
+            return Err(vec![StmtTooShort(input[0].pos)]);
         }
-
         use ControlStatementIdentifier::Switch;
 
         let left_br_idx = 1;
         return match &input[..left_br_idx + 1] {
             [
-            Token { token: WrappedToken::ReservedName(ReservedName::ControlStatement(Switch)), .. },
+            Token {
+                token: WrappedToken::ReservedName(ReservedName::ControlStatement(Switch)), ..
+            },
             Token {
                 token: WrappedToken::Bracket(
                     Bracket {
@@ -591,11 +523,10 @@ impl Parse for SwitchNode {
                 ), ..
             }
             ] => {
-                let right_br_idx
-                    = get_right_bracket_index(input, left_br_idx).ok_or(())?;
+                let right_br_idx = get_right_bracket_index(input, left_br_idx);
 
                 if right_br_idx == left_br_idx + 1 {  // switch ( )
-                    return Err(());
+                    return Err(vec![UnexpectedToken(input[left_br_idx].pos)]);
                 }
 
                 let rvalue = RvalueNode::parse_exact(
@@ -609,20 +540,21 @@ impl Parse for SwitchNode {
                     body,
                 }, toks_consumed))
             }
-            _ => Err(())
+            _ => Err(vec![UnexpectedToken(input[1].pos)])
         };
     }
 }
 
 impl Parse for CaseNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
         if input.len() < 3 {  // default : null_stmt
-            return Err(());
+            return Err(vec![StmtTooShort(input[0].pos)]);
         }
 
         use token::ControlStatementIdentifier::{Case, Default};
 
+        let pos = input[0].pos;
         let colon_pos: usize;
         let constant =
             match input[0].token {
@@ -632,17 +564,17 @@ impl Parse for CaseNode {
                     if let ConstantNode { constant: Constant::Number(_), .. } = constant {
                         Some(constant)
                     } else {
-                        return Err(());
+                        return Err(vec![WrongConstant(pos)]);
                     }
                 }
                 WrappedToken::ReservedName(ReservedName::ControlStatement(Default)) => {
                     colon_pos = 1;
                     None
                 }
-                _ => return Err(()),
+                _ => return Err(vec![UnexpectedToken(pos)]),
             };
         if input[colon_pos].token != WrappedToken::Colon {
-            return Err(());
+            return Err(vec![ExpectedTokenNotFound(input[colon_pos].pos)]);
         }
         let next_stmt_idx = colon_pos + 1;
         let (next_stmt, adv) = StatementNode::parse(&input[next_stmt_idx..])?;
@@ -656,21 +588,20 @@ impl Parse for CaseNode {
 }
 
 impl Parse for IfNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
         if input.len() < 5 {  // if ( rvalue ) ;
-            return Err(());
+            return Err(vec![StmtTooShort(input[0].pos)]);
         }
 
         use token::ControlStatementIdentifier::{If, Else};
         use token::BracketType::Round;
 
         if input[0].token != WrappedToken::ReservedName(ReservedName::ControlStatement(If)) {
-            return Err(());
+            return Err(vec![ExpectedTokenNotFound(input[0].pos)]);
         }
 
-        let (condition, adv) = extract_bracketed_rvalue(&input[1..],
-                                                        Round)?;
+        let (condition, adv) = extract_bracketed_rvalue(&input[1..], Round)?;
         let mut toks_consumed = 1 + adv;
         let condition = condition.into_truth_value();
         let (body, adv) = StatementNode::parse(&input[toks_consumed..])?;
@@ -681,7 +612,7 @@ impl Parse for IfNode {
                 if tok.token == WrappedToken::ReservedName(ReservedName::ControlStatement(Else)) {
                     toks_consumed += 1;
                     if toks_consumed == input.len() {
-                        return Err(());
+                        return Err(vec![StmtTooShort(input.last().unwrap().pos)]);
                     }
 
                     let (else_body, adv) = StatementNode::parse(
@@ -705,15 +636,15 @@ impl Parse for IfNode {
 }
 
 impl Parse for WhileNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
         if input.len() < 5 {  // while ( x ) ;
-            return Err(());
+            return Err(vec![StmtTooShort(input[0].pos)]);
         }
         use ControlStatementIdentifier::While;
         use BracketType::Round;
         if input[0].token != WrappedToken::ReservedName(ReservedName::ControlStatement(While)) {
-            return Err(());
+            return Err(vec![ExpectedTokenNotFound(input[0].pos)]);
         }
 
         let (condition, adv) = extract_bracketed_rvalue(&input[1..],
@@ -722,7 +653,7 @@ impl Parse for WhileNode {
         let condition = condition.into_truth_value();
 
         if input.len() <= toks_consumed {
-            return Err(());
+            return Err(vec![StmtTooShort(input.last().unwrap().pos)]);
         }
         let (body, adv) = StatementNode::parse(&input[toks_consumed..])?;
         toks_consumed += adv;
@@ -731,7 +662,7 @@ impl Parse for WhileNode {
     }
 }
 
-fn get_right_bracket_index(tokens: &[Token], left_br_idx: usize) -> Option<usize> {
+fn get_right_bracket_index(tokens: &[Token], left_br_idx: usize) -> usize {
     if let Some(
         Token {
             token: WrappedToken::Bracket(
@@ -743,39 +674,36 @@ fn get_right_bracket_index(tokens: &[Token], left_br_idx: usize) -> Option<usize
         tokens
             .into_iter()
             .position(|t| t.pos == *right_bracket_pos)
+            .unwrap()
     } else {
         unreachable!()
     }
 }
 
-pub(crate) fn extract_bracketed_expression(tokens: &[Token]) -> Result<&[Token], ()> {
-    return if let Token {
+pub(crate) fn extract_bracketed_expression(tokens: &[Token]) -> Result<&[Token], Vec<Issue>> {
+    if let Token {
         token: WrappedToken::Bracket(Bracket { left_or_right: LeftOrRight::Left, .. }), ..
-    } = tokens.get(0).ok_or(())? {
-        let right_br_idx
-            = get_right_bracket_index(tokens, 0).ok_or(())?;
-        Ok(&tokens[1..right_br_idx])
-    } else {
-        Err(())
-    };
+    } = tokens[0] {
+        let right_br_idx = get_right_bracket_index(tokens, 0);
+        return Ok(&tokens[1..right_br_idx]);
+    }
+    unreachable!()
 }
 
 impl Parse for CompoundStatementNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
-        if input.len() < 2 {
-            return Err(());
-        }
         use BracketType::Curly;
+
         if let WrappedToken::Bracket(
-            Bracket {
-                left_or_right: LeftOrRight::Left,
-                bracket_type: Curly, ..
-            }) = input[0].token {
-            // OK
+            Bracket { left_or_right, bracket_type, .. }
+        ) = input[0].token {
+            debug_assert_eq!(left_or_right, LeftOrRight::Left);
+            debug_assert_eq!(bracket_type, Curly)
         } else {
-            return Err(());
+            unreachable!()
         }
+
         let br_expr = extract_bracketed_expression(input)?;
         let body_len = br_expr.len();
         let mut statement_list = vec![];
@@ -795,19 +723,20 @@ impl Parse for CompoundStatementNode {
 }
 
 impl Parse for GotoNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
+        let pos = input[0].pos;
         if input.len() < 3 {  // goto label ;
-            return Err(());
+            return Err(vec![StmtTooShort(pos)]);
         }
 
         use token::ControlStatementIdentifier::Goto;
 
         if input[0].token != WrappedToken::ReservedName(ReservedName::ControlStatement(Goto)) {
-            return Err(());
+            return Err(vec![ExpectedTokenNotFound(pos)]);
         }
 
-        let semicolon_pos = get_semicolon_pos(input).ok_or(())?;
+        let semicolon_pos = get_semicolon_pos(input)?;
         let toks_consumed = semicolon_pos + 1;
 
         let rvalue = &input[1..semicolon_pos];
@@ -819,20 +748,18 @@ impl Parse for GotoNode {
 }
 
 impl Parse for ReturnNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
-        if input.is_empty() {
-            return Err(());
-        }
+        debug_assert!(!input.is_empty());
 
         use BracketType::Round;
         use ControlStatementIdentifier::Return;
 
         if input[0].token != WrappedToken::ReservedName(ReservedName::ControlStatement(Return)) {
-            return Err(());
+            return Err(vec![ExpectedTokenNotFound(input[0].pos)]);
         }
 
-        let semicolon_pos = get_semicolon_pos(input).ok_or(())?;
+        let semicolon_pos = get_semicolon_pos(input)?;
         let toks_consumed = semicolon_pos + 1;
 
         if semicolon_pos == 1 {  // return ;
@@ -848,13 +775,13 @@ impl Parse for ReturnNode {
 }
 
 impl Parse for RvalueAndSemicolonNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
         if input.len() < 2 {  // x ;
-            return Err(());
+            return Err(vec![StmtTooShort(input[0].pos)]);
         }
 
-        let semicolon_pos = get_semicolon_pos(input).ok_or(())?;
+        let semicolon_pos = get_semicolon_pos(input)?;
         let toks_consumed = semicolon_pos + 1;
 
         let rvalue = &input[..semicolon_pos];
@@ -866,10 +793,10 @@ impl Parse for RvalueAndSemicolonNode {
 }
 
 impl Parse for BreakNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
-        if input.len() < 2 {
-            return Err(());
+        if input.len() < 2 {  // break ;
+            return Err(vec![StmtTooShort(input[0].pos)]);
         }
 
         use token::ControlStatementIdentifier::Break;
@@ -878,7 +805,7 @@ impl Parse for BreakNode {
             [Token { token: WrappedToken::ReservedName(ReservedName::ControlStatement(Break)), .. },
             Token { token: WrappedToken::Semicolon, .. }] =>
                 Ok((BreakNode {}, 2)),
-            _ => Err(())
+            _ => Err(vec![ExpectedTokenNotFound(input[1].pos)])
         }
     }
 }
@@ -886,205 +813,155 @@ impl Parse for BreakNode {
 impl ParseExact for BreakNode {}
 
 impl Parse for DeclarationNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
-        if input.is_empty() {
-            return Err(());
-        }
+        debug_assert!(!input.is_empty());
 
         let first = &input[0];
         match first.token {
             WrappedToken::ReservedName(ReservedName::DeclarationSpecifier(ds)) => {
                 match ds {
                     DeclarationSpecifier::Auto => {
-                        if let Ok((auto_decl, adv)) = AutoDeclarationNode::parse(input) {
-                            Ok((DeclarationNode::AutoDeclaration(auto_decl), adv))
-                        } else {
-                            Err(())
-                        }
+                        let (auto_decl, adv) = AutoDeclarationNode::parse(input)?;
+                        Ok((DeclarationNode::AutoDeclaration(auto_decl), adv))
                     }
                     DeclarationSpecifier::Extrn => {
-                        if let Ok((extern_decl, adv)) = ExternDeclarationNode::parse(input) {
-                            Ok((DeclarationNode::ExternDeclaration(extern_decl), adv))
-                        } else {
-                            Err(())
-                        }
+                        let (extern_decl, adv) = ExternDeclarationNode::parse(input)?;
+                        Ok((DeclarationNode::ExternDeclaration(extern_decl), adv))
                     }
                 }
             }
             WrappedToken::Name(_) => {
-                if let Ok((label_decl, adv)) = LabelDeclarationNode::parse(input) {
-                    Ok((DeclarationNode::LabelDeclaration(label_decl), adv))
-                } else {
-                    Err(())
-                }
+                let (label_decl, adv) = LabelDeclarationNode::parse(input)?;
+                Ok((DeclarationNode::LabelDeclaration(label_decl), adv))
             }
-            _ => Err(()),
+            _ => Err(vec![UnexpectedToken(first.pos)]),
         }
     }
 }
 
 impl Parse for Statement {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
-        if input.is_empty() {
-            return Err(());
-        }
-        match &input[0].token {
-            WrappedToken::ReservedName(res_name) => {
+        debug_assert!(!input.is_empty());
+        use WrappedToken::*;
+        let t = &input[0];
+        let pos = t.pos;
+        match &t.token {
+            ReservedName(res_name) => {
+                use ControlStatementIdentifier::*;
                 match res_name {
-                    ReservedName::ControlStatement(cs) => {
+                    token::ReservedName::ControlStatement(cs) => {
                         match cs {
-                            ControlStatementIdentifier::If => {
-                                if let Ok((r#if, adv)) = IfNode::parse(input) {
-                                    Ok((Statement::If(r#if), adv))
-                                } else {
-                                    Err(())
-                                }
+                            If => {
+                                let (r#if, adv) = IfNode::parse(input)?;
+                                Ok((Statement::If(r#if), adv))
                             }
-                            ControlStatementIdentifier::Else => {
-                                Err(())
+                            Else => {
+                                Err(vec![UnexpectedToken(pos)])
                             }
-                            ControlStatementIdentifier::Goto => {
-                                if let Ok((goto, adv)) = GotoNode::parse(input) {
-                                    Ok((Statement::Goto(goto), adv))
-                                } else {
-                                    Err(())
-                                }
+                            Goto => {
+                                let (goto, adv) = GotoNode::parse(input)?;
+                                Ok((Statement::Goto(goto), adv))
                             }
-                            ControlStatementIdentifier::Switch => {
-                                if let Ok((switch, adv)) = SwitchNode::parse(input) {
-                                    Ok((Statement::Switch(switch), adv))
-                                } else {
-                                    Err(())
-                                }
+                            Switch => {
+                                let (switch, adv) = SwitchNode::parse(input)?;
+                                Ok((Statement::Switch(switch), adv))
                             }
-                            ControlStatementIdentifier::While => {
-                                if let Ok((r#while, adv)) = WhileNode::parse(input) {
-                                    Ok((Statement::While(r#while), adv))
-                                } else {
-                                    Err(())
-                                }
+                            While => {
+                                let (r#while, adv) = WhileNode::parse(input)?;
+                                Ok((Statement::While(r#while), adv))
                             }
-                            ControlStatementIdentifier::Break => {
-                                if let Ok((r#break, adv)) = BreakNode::parse(input) {
-                                    Ok((Statement::Break(r#break), adv))
-                                } else {
-                                    Err(())
-                                }
+                            Break => {
+                                let (r#break, adv) = BreakNode::parse(input)?;
+                                Ok((Statement::Break(r#break), adv))
                             }
-                            ControlStatementIdentifier::Return => {
-                                if let Ok((r#return, adv)) = ReturnNode::parse(input) {
-                                    Ok((Statement::Return(r#return), adv))
-                                } else {
-                                    Err(())
-                                }
+                            Return => {
+                                let (r#return, adv) = ReturnNode::parse(input)?;
+                                Ok((Statement::Return(r#return), adv))
                             }
-                            ControlStatementIdentifier::Case
-                            | ControlStatementIdentifier::Default => {
-                                if let Ok((case, adv)) = CaseNode::parse(input) {
-                                    Ok((Statement::Case(case), adv))
-                                } else {
-                                    Err(())
-                                }
+                            Case | Default => {
+                                let (case, adv) = CaseNode::parse(input)?;
+                                Ok((Statement::Case(case), adv))
                             }
                         }
                     }
-                    ReservedName::DeclarationSpecifier(_) => {
-                        if let Ok((decl_node, adv)) = DeclarationNode::parse(input) {
-                            Ok((Statement::Declaration(decl_node), adv))
-                        } else {
-                            Err(())
-                        }
+                    token::ReservedName::DeclarationSpecifier(_) => {
+                        let (decl_node, adv) = DeclarationNode::parse(input)?;
+                        Ok((Statement::Declaration(decl_node), adv))
                     }
                 }
             }
-            WrappedToken::Semicolon => return Ok((Statement::NullStatement, 1)),
-            WrappedToken::Bracket(
-                Bracket { left_or_right: LeftOrRight::Left, bracket_type: BracketType::Curly, .. }
-            ) => {
-                if let Ok(
-                    (comp_stmt, adv)
-                ) = CompoundStatementNode::parse(input) {
-                    Ok((Statement::Compound(comp_stmt), adv))
-                } else {
-                    Err(())
+            Semicolon => return Ok((Statement::NullStatement, 1)),
+            Bracket(
+                token::Bracket {
+                    left_or_right: LeftOrRight::Left,
+                    bracket_type: BracketType::Curly, ..
                 }
+            ) => {
+                let (comp_stmt, adv) = CompoundStatementNode::parse(input)?;
+                Ok((Statement::Compound(comp_stmt), adv))
             }
             t => {
-                if let WrappedToken::Name(_) = t {
-                    if let Ok((label_decl, adv)) = DeclarationNode::parse(input) {
+                if let Name(_) = t {
+                    if input[1].token == WrappedToken::Colon {
+                        let (label_decl, adv) = DeclarationNode::parse(input)?;
                         return Ok((Statement::Declaration(label_decl), adv));
                     }
                 }
-                if let Ok(
-                    (rv_and_semicolon, adv)
-                ) = RvalueAndSemicolonNode::parse(input) {
-                    Ok((Statement::RvalueAndSemicolon(rv_and_semicolon), adv))
-                } else {
-                    Err(())
-                }
+                let (rv_and_semicolon, adv) = RvalueAndSemicolonNode::parse(input)?;
+                Ok((Statement::RvalueAndSemicolon(rv_and_semicolon), adv))
             }
         }
     }
 }
 
 impl Parse for StatementNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
-        if input.is_empty() {
-            return Err(());
-        }
+        debug_assert!(!input.is_empty());
 
-        return if let Ok((statement, adv)) = Statement::parse(input) {
-            Ok((StatementNode {
-                position: input[0].pos.clone(),
-                statement: Box::new(statement),
-            }, adv))
-        } else {
-            Err(())
-        };
+        let (statement, adv) = Statement::parse(input)?;
+        Ok((StatementNode {
+            position: input[0].pos.clone(),
+            statement: Box::new(statement),
+        }, adv))
     }
 }
 
 impl Parse for DefinitionNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
-        if let Ok(
-            (var_def_node, adv)
-        ) = VariableDefinitionNode::parse(input) {
-            return Ok((DefinitionNode::Variable(var_def_node), adv));
+        if let WrappedToken::Bracket(
+            Bracket {
+                left_or_right: LeftOrRight::Left, bracket_type: BracketType::Round, ..
+            }) = input[1].token {
+            let (fn_def_node, adv) = FunctionDefinitionNode::parse(input)?;
+            Ok((DefinitionNode::Function(fn_def_node), adv))
+        } else if let WrappedToken::Bracket(
+            Bracket {
+                left_or_right: LeftOrRight::Left, bracket_type: BracketType::Square, ..
+            }) = input[1].token {
+            let (vec_def_node, adv) = VectorDefinitionNode::parse(input)?;
+            Ok((DefinitionNode::Vector(vec_def_node), adv))
+        } else {
+            let (var_def_node, adv) = VariableDefinitionNode::parse(input)?;
+            Ok((DefinitionNode::Variable(var_def_node), adv))
         }
-        if let Ok(
-            (vec_def_node, adv)
-        ) = VectorDefinitionNode::parse(input) {
-            return Ok((DefinitionNode::Vector(vec_def_node), adv));
-        }
-        if let Ok(
-            (fn_def_node, adv)
-        ) = FunctionDefinitionNode::parse(input) {
-            return Ok((DefinitionNode::Function(fn_def_node), adv));
-        }
-        Err(())
     }
 }
 
 impl Parse for ProgramNode {
-    fn parse(input: &[Token]) -> Result<(Self, usize), ()>
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
         where Self: Sized {
         let mut defs = vec![];
         let mut offset: usize = 0;
-        while let Ok(
-            (def_node, adv)
-        ) = DefinitionNode::parse(&input[offset..]) {
+        while offset < input.len() {
+            let (def_node, adv) = DefinitionNode::parse(&input[offset..])?;
             offset += adv;
             defs.push(def_node);
         }
-        if offset != input.len() {
-            Err(())
-        } else {
-            Ok((ProgramNode::from(defs), offset))
-        }
+        Ok((ProgramNode::from(defs), offset))
     }
 }
 
@@ -1256,26 +1133,29 @@ impl Parser<'_> {
             match Parser::find_bracket_pairs(tokens.into_iter()) {
                 Ok(processed_tokens) => processed_tokens,
                 Err(BracketsError::NotClosed(pos)) => {
-                    issues.push(Issue::BracketNotClosed(pos));
+                    issues.push(BracketNotClosed(pos));
                     return Err(());
                 }
                 Err(BracketsError::NotOpened(pos)) => {
-                    issues.push(Issue::BracketNotOpened(pos));
+                    issues.push(BracketNotOpened(pos));
                     return Err(());
                 }
             };
         if tokens.is_empty() {
-            issues.push(Issue::EmptyTokenStream)
+            issues.push(EmptyTokenStream)
         }
 
         let prog_node = ProgramNode::parse_exact(&tokens);
-        if let Err(err) = prog_node {
-            issues.push(Issue::ParsingError);
-            return Err(err);
+        match prog_node {
+            Err(mut err) => {
+                issues.append(&mut err);
+                return Err(());
+            }
+            Ok(prog_node) => {
+                let res = prog_node.flatten_node();
+                let mut analyzer = Analyzer::new(self.source_code);
+                Ok(analyzer.run(res, issues))
+            }
         }
-
-        let mut analyzer = Analyzer::new(self.source_code);
-        let res = prog_node.unwrap().flatten_node();
-        Ok(analyzer.run(res, issues))
     }
 }
