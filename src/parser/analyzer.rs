@@ -517,11 +517,13 @@ impl<'a> Analyzer<'a> {
 
                     if Some(&restore_because_this_stmt_ended.pos) == breakable_stmt_stack.last() {
                         if let FlatNode::Switch(_) = restore_because_this_stmt_ended.node {
-                            debug_assert!(cases_stack.pop().is_some());
+                            let cases_for_last_switch = cases_stack.pop();
+                            debug_assert!(cases_for_last_switch.is_some());
                         }
                         breakable_stmt_stack.pop();
                     } else if let FlatNode::Compound = restore_because_this_stmt_ended.node {
-                        debug_assert!(compound_stack.pop().is_some());
+                        let last_comp_pos = compound_stack.pop();
+                        debug_assert!(last_comp_pos.is_some());
                         let parent_scope = scope_stack.pop().unwrap();
                         *local_scope = parent_scope;
                     }
