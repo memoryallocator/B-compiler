@@ -577,7 +577,11 @@ impl Parse for CaseNode {
             return Err(vec![ExpectedTokenNotFound(input[colon_pos].pos)]);
         }
         let next_stmt_idx = colon_pos + 1;
-        let (next_stmt, adv) = StatementNode::parse(&input[next_stmt_idx..])?;
+        let slice = &input[next_stmt_idx..];
+        if slice.is_empty() {
+            return Err(vec![StmtTooShort(input[next_stmt_idx - 1].pos)]);
+        }
+        let (next_stmt, adv) = StatementNode::parse(slice)?;
         let toks_consumed = next_stmt_idx + adv;
 
         Ok((CaseNode {
