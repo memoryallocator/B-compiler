@@ -851,7 +851,10 @@ impl Parse for RvalueNode {
                             }
                         ));
                     } else {
-                        return Err(vec![NotAnLvalue(lhs_pos)]);
+                        return Err(vec![OpCannotBeApplied {
+                            op_pos: assign_pos,
+                            expr_pos: Some(lhs_pos),
+                        }]);
                     }
                 }
 

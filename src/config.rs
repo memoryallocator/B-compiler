@@ -1,6 +1,6 @@
 use std::*;
 use collections::{HashMap, HashSet};
-use fmt;
+use fmt::{Display, Formatter};
 
 use crate::tokenizer::token;
 use token::*;
@@ -24,8 +24,6 @@ pub(crate) enum Issue {
     NoOperandForOperator(Operator, TokenPos, Option<LeftOrRight>),
     NoCondition(TokenPos),
     NoColonInCond(TokenPos),
-    NotAnLvalue(TokenPos),
-    NoInputToken(TokenPos),
     NameNotDefined { name: String, pos: TokenPos },
     NameRedefined {
         curr_def: (String, TokenPos),
@@ -35,7 +33,7 @@ pub(crate) enum Issue {
         decl: (String, DeclInfoAndPos),
         prev_decl: DeclInfoAndPos,
     },
-    VecWithNoSizeAndInits(String, TokenPos),
+    VecWithNoSizeAndIvals(String, TokenPos),
     VecSizeIsNotANumber { name: String, pos: TokenPos },
     VecTooManyIvals {
         vec_def: (String, TokenPos),
@@ -64,7 +62,7 @@ pub(crate) enum Issue {
         prev_decl: DeclInfoAndPos,
     },
     UnexpectedKeyword(TokenPos),
-    CaseEncounteredTwice(TokenPos),
+    CaseEncounteredTwice { curr: TokenPos, prev: TokenPos },
     LiteralTooLong(TokenPos),
     NameHasNoRvalue(String, TokenPos),
     NoMainFn,
@@ -83,11 +81,13 @@ fn def_pos_to_string(def_pos: &Option<TokenPos>) -> String {
     }
 }
 
-impl fmt::Display for Issue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for Issue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use Issue::*;
         write!(f, "{}", match self {
-            ParsingError(pos) => format!("{}: failed to parse", def_pos_to_string(&Some(*pos))),
+            ParsingError(pos) => {
+                format!("{}: failed to parse", pos)
+            }
 
             NameRedefined {
                 curr_def: (name, pos),
@@ -107,7 +107,143 @@ impl fmt::Display for Issue {
                         name, info.pos, def_pos_to_string(&global_def.pos_if_user_defined))
             }
 
-            _ => todo!()
+            BracketNotOpened(pos) => {
+                format!("there is a closing bracket at {}, but there is no opening bracket", pos)
+            }
+
+            BracketNotClosed(pos) => {
+                format!("there is an opening bracket at {}, but there is no closing bracket", pos)
+            }
+
+            EmptyTokenStream => {
+                "failed to recognize a single token".to_owned()
+            }
+
+            FailedToParseExact(pos) => {
+                format!("failed to parse a construct at {}", pos)
+            }
+
+            UnexpectedToken(pos) => {
+                format!("unexpected token at {}", pos)
+            }
+
+            ExpectedTokenNotFound(pos) => {
+                format!("expected token not found at {}", pos)
+            }
+
+            StmtTooShort(pos) => {
+                format!("expected more tokens at {}", pos)
+            }
+
+            NoNextStmtAfterDecl(pos) => {
+                format!("there must be a statement after a declaration at {}", pos)
+            }
+
+            EmptyBracketedExpr(pos) => {
+                format!("empty bracketed expression at {}", pos)
+            }
+
+            WrongConstant(pos) => {
+                format!("bad type of a constant at {}", pos)
+            }
+
+            ExpectedPrimaryExpr(pos) => {
+                format!("expression at {} is not a primary expression", pos)
+            }
+
+            OpCannotBeApplied { op_pos, expr_pos } => {
+                let reason = if let Some(expr_pos) = expr_pos {
+                    format!("expression at {} is not a valid operand", expr_pos)
+                } else {
+                    "no operand".to_string()
+                };
+                format!("operator at {} cannot be applied: ", op_pos) + &reason
+            }
+
+            UnexpectedOperand(pos) => {
+                format!("unexpected operand at {}", pos)
+            }
+
+            NoOperandForOperator(op, op_pos, left_or_right) => {
+                format!("{}: no {} operand for operator {}", op_pos,
+                        if let Some(left_or_right) = left_or_right {
+                            format!("{}", left_or_right)
+                        } else {
+                            "".to_string()
+                        }, op)
+            }
+
+            NoCondition(pos) => {
+                format!("{}: no condition in a conditional expression", pos)
+            }
+
+            NoColonInCond(pos) => {
+                format!("{}: missing colon in a conditional expression", pos)
+            }
+
+            NameNotDefined { name, pos } => {
+                format!("{}: name {} is not defined", pos, name)
+            }
+
+            NameRedeclared { decl: (name, decl), prev_decl } => {
+                format!("name {}, declared at {}, is redeclared at {}",
+                        name, decl.pos, prev_decl.pos)
+            }
+
+            VecWithNoSizeAndIvals(v, pos) => {
+                format!("{}: vector {} has no size and initial values", pos, v)
+            }
+
+            VecTooManyIvals { vec_def: (vec, pos), ivals_len, specified_size_plus_1 } => {
+                format!("{}: vector {} has size {} and {} initial values",
+                        pos, vec, specified_size_plus_1, ivals_len)
+            }
+
+            ExternSymbolNotFound { name, extern_pos } => {
+                format!("name {}, imported at {}, not found", name, extern_pos)
+            }
+
+            DeclShadowsFnParameter {
+                decl: (name, decl),
+                param_pos,
+                fn_def: (fn_name, fn_pos)
+            } => {
+                format!("in function {} defined at {}: name {}, declared at {}, shadows a parameter name specified at {}",
+                        fn_name, fn_pos, name, decl.pos, param_pos)
+            }
+
+            UnnecessaryImport { curr_decl: (name, pos), prev_import_pos } => {
+                format!("{}: name {} is already imported ({})", pos, name, prev_import_pos)
+            }
+
+            DeclShadowsPrevious { decl: (name, decl), prev_decl } => {
+                format!("name {}, declared at {}, shadows declaration at {}",
+                        name, decl.pos, prev_decl.pos)
+            }
+
+            UnexpectedKeyword(pos) => {
+                format!("unexpected keyword at {}", pos)
+            }
+
+            CaseEncounteredTwice{ curr, prev } => {
+                format!("case encountered twice: first at {}, then at {}", prev, curr)
+            }
+
+            LiteralTooLong(pos) => {
+                format!("the literal at {} is too long", pos)
+            }
+
+            NameHasNoRvalue(name, pos) => {
+                format!("name {} at {} has no rvalue", name, pos)
+            }
+
+            NoMainFn => {
+                "no main function found".to_owned()
+            }
+
+            InvalidParameterCount { expected, actual, pos } => {
+                format!("{}: expected {} parameters, got {}", pos, expected, actual)
+            }
         })
     }
 }
@@ -118,8 +254,8 @@ pub(crate) enum Arch {
     x86_64,
 }
 
-impl fmt::Display for Arch {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for Arch {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Arch::x86_64 => write!(f, "x86-64"),
         }
@@ -141,8 +277,8 @@ pub(crate) enum PlatformName {
     Windows,
 }
 
-impl fmt::Display for PlatformName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for PlatformName {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             PlatformName::Linux => write!(f, "Linux"),
             PlatformName::Windows => write!(f, "Windows"),
@@ -299,6 +435,17 @@ pub(crate) fn get_reserved_symbols() -> ReservedSymbolsTable {
 pub(crate) enum NumberOfParameters {
     Exact(usize),
     AtLeast(usize),
+}
+
+impl Display for NumberOfParameters {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", match self {
+            NumberOfParameters::Exact(n) => n.to_string(),
+            NumberOfParameters::AtLeast(n) => {
+                format!("at least {}", n)
+            }
+        })
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]

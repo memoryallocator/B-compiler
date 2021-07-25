@@ -1,5 +1,5 @@
 use std::*;
-use collections::{HashMap, HashSet};
+use collections::HashMap;
 use ops::Range;
 use convert::TryInto;
 use cell::Cell;
@@ -124,7 +124,7 @@ impl<'a> Analyzer<'a> {
                             let s = &vec_sz.constant;
                             Some(match s {
                                 Constant::Number(nmb) => *nmb,
-                                Constant::String(s) => {
+                                Constant::String(..) => {
                                     issues.push(VecSizeIsNotANumber {
                                         name: name.clone(),
                                         pos,
@@ -253,7 +253,7 @@ impl<'a> Analyzer<'a> {
                                 let s = &specified_size.constant;
                                 match s {
                                     Constant::Number(nmb) => Some(nmb),
-                                    Constant::String(s) => {
+                                    Constant::String(..) => {
                                         issues.push(Issue::VecSizeIsNotANumber {
                                             name: name.clone(),
                                             pos,
@@ -280,7 +280,7 @@ impl<'a> Analyzer<'a> {
                                 cmp::max(ivals_len, specified_size_plus_1)
                             } else {
                                 if ivals_len == 0 {
-                                    issues.push(Issue::VecWithNoSizeAndInits(name.clone(), pos));
+                                    issues.push(Issue::VecWithNoSizeAndIvals(name.clone(), pos));
                                 }
                                 cmp::max(ivals_len, 1)
                             };
@@ -560,18 +560,17 @@ impl<'a> Analyzer<'a> {
                 FlatNode::Switch(var) => {
                     breakable_stmt_stack.push(node.pos);
                     self.process_rvalue(var, local_scope, issues);
-                    cases_stack.push(HashSet::new());
+                    cases_stack.push(HashMap::new());
                 }
                 FlatNode::Case(case_val) => {
                     if let Some(cases) = cases_stack.last_mut() {
-                        if !cases.insert(case_val) {
-                            issues.push(Issue::CaseEncounteredTwice(
-                                if let Some(cs) = case_val {
-                                    cs.position
-                                } else {
-                                    node.pos
-                                }
-                            ))
+                        let case_const = match case_val {
+                            None => (None, node.pos),
+                            Some(c) => (Some(c.constant.clone()), c.position),
+                        };
+                        let prev = cases.insert(case_const.0, case_const.1);
+                        if let Some(prev) = prev {
+                            issues.push(Issue::CaseEncounteredTwice { curr: case_const.1, prev })
                         }
                     } else {
                         issues.push(Issue::UnexpectedKeyword(node.pos))

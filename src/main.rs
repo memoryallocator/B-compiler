@@ -60,7 +60,7 @@ fn main() {
     for issue in issues {
         use Issue::*;
         let error = match issue {
-            VecWithNoSizeAndInits(..) | VecTooManyIvals { .. }
+            VecWithNoSizeAndIvals(..) | VecTooManyIvals { .. }
             | DeclShadowsGlobalDef { .. } | UnnecessaryImport { .. }
             | DeclShadowsFnParameter { .. } | DeclShadowsPrevious { .. }
             | InvalidParameterCount { .. } => false,

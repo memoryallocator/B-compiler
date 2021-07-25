@@ -1,6 +1,7 @@
 use std::*;
 use convert::TryFrom;
 use borrow::Borrow;
+use fmt::{Display, Formatter};
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Hash)]
 pub(crate) enum BracketType {
@@ -63,16 +64,34 @@ pub(crate) enum LeftOrRight {
     Right,
 }
 
+impl Display for LeftOrRight {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", match self {
+            LeftOrRight::Left => "left",
+            LeftOrRight::Right => "right"
+        })
+    }
+}
+
 #[derive(PartialEq, Eq, Clone, Debug, Hash)]
 pub(crate) enum Constant {
     Number(u64),
-    String(String)
+    String(String),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum UnaryOperation {
     LogicalNot,
     Complement,
+}
+
+impl Display for UnaryOperation {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", match self {
+            UnaryOperation::LogicalNot => "!",
+            UnaryOperation::Complement => "~",
+        })
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
@@ -85,6 +104,19 @@ pub(crate) enum BinaryRelation {
     Ne,
 }
 
+impl Display for BinaryRelation {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", match self {
+            BinaryRelation::Gt => ">",
+            BinaryRelation::Eq => "==",
+            BinaryRelation::Lt => "<",
+            BinaryRelation::Ge => ">=",
+            BinaryRelation::Le => "<=",
+            BinaryRelation::Ne => "!=",
+        })
+    }
+}
+
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
 pub(crate) enum BinaryOperation {
     Div,
@@ -95,6 +127,26 @@ pub(crate) enum BinaryOperation {
     Cmp(BinaryRelation),
 }
 
+impl Display for BinaryOperation {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", match self {
+            BinaryOperation::Div => "/".to_owned(),
+            BinaryOperation::Mod => "%".to_owned(),
+            BinaryOperation::Or => "|".to_owned(),
+            BinaryOperation::Xor => "^".to_owned(),
+            BinaryOperation::Shift(l_or_r) => {
+                match l_or_r {
+                    LeftOrRight::Left => "<<",
+                    LeftOrRight::Right => ">>",
+                }.to_owned()
+            }
+            BinaryOperation::Cmp(cmp) => {
+                format!("{}", cmp)
+            }
+        })
+    }
+}
+
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
 pub(crate) enum RichBinaryOperation {
     RegularBinary(BinaryOperation),
@@ -103,6 +155,20 @@ pub(crate) enum RichBinaryOperation {
     Mul,
     BitwiseAnd,
     LogicalAnd,
+}
+
+impl Display for RichBinaryOperation {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", match self {
+            RichBinaryOperation::RegularBinary(b) => {
+                format!("{}", b)
+            }
+            RichBinaryOperation::Add => "+".to_owned(),
+            RichBinaryOperation::Sub => "-".to_owned(),
+            RichBinaryOperation::Mul => "*".to_owned(),
+            RichBinaryOperation::BitwiseAnd | RichBinaryOperation::LogicalAnd => "&".to_owned(),
+        })
+    }
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
@@ -168,6 +234,37 @@ impl TryFrom<&Token> for Operator {
             return Ok(*op);
         }
         Err(())
+    }
+}
+
+impl Display for Operator {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", match self {
+            Operator::Plus => "+".to_owned(),
+            Operator::Minus => "-".to_owned(),
+            Operator::Asterisk => "*".to_owned(),
+            Operator::Ampersand => "&".to_owned(),
+            Operator::Unary(un) => {
+                format!("{}", un)
+            }
+            Operator::Binary(bin) => {
+                format!("{}", bin)
+            }
+            Operator::Assign(a) => {
+                "=".to_owned() + &match a.bin_op {
+                    None => "".to_owned(),
+                    Some(bin_op) => {
+                        format!("{}", bin_op)
+                    }
+                }
+            }
+            Operator::IncDec(id) => {
+                match id {
+                    IncOrDec::Increment => "++",
+                    IncOrDec::Decrement => "--",
+                }.to_owned()
+            }
+        })
     }
 }
 
