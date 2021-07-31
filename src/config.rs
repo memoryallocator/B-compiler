@@ -378,18 +378,18 @@ impl TargetPlatform {
 #[derive(Copy, Clone)]
 pub(crate) struct CompilerOptions {
     pub(crate) target_platform: TargetPlatform,
-    pub(crate) short_circuit: bool,
     pub(crate) stack_size: u64,
     pub(crate) heap_size: u64,
+    pub(crate) continue_is_enabled: bool,
 }
 
 impl Default for CompilerOptions {
     fn default() -> Self {
         CompilerOptions {
             target_platform: TargetPlatform::native(),
-            short_circuit: true,
             stack_size: 4096,
             heap_size: 65536,
+            continue_is_enabled: false
         }
     }
 }
@@ -414,20 +414,21 @@ pub(crate) type ReservedSymbolsTable = HashMap<String,
 
 pub(crate) fn get_reserved_symbols() -> ReservedSymbolsTable {
     use DeclarationSpecifier::*;
-    use ControlStatementIdentifier::*;
+    use CtrlStmtIdent::*;
 
     vec![
         ("auto", ReservedName::DeclarationSpecifier(Auto)),
         ("extrn", ReservedName::DeclarationSpecifier(Extrn)),
-        ("goto", ReservedName::ControlStatement(Goto)),
-        ("switch", ReservedName::ControlStatement(Switch)),
-        ("case", ReservedName::ControlStatement(Case)),
-        ("return", ReservedName::ControlStatement(Return)),
-        ("if", ReservedName::ControlStatement(If)),
-        ("else", ReservedName::ControlStatement(Else)),
-        ("while", ReservedName::ControlStatement(While)),
-        ("break", ReservedName::ControlStatement(Break)),
-        ("default", ReservedName::ControlStatement(Default)),
+        ("goto", ReservedName::CtrlStmt(Goto)),
+        ("switch", ReservedName::CtrlStmt(Switch)),
+        ("case", ReservedName::CtrlStmt(Case)),
+        ("return", ReservedName::CtrlStmt(Return)),
+        ("if", ReservedName::CtrlStmt(If)),
+        ("else", ReservedName::CtrlStmt(Else)),
+        ("while", ReservedName::CtrlStmt(While)),
+        ("break", ReservedName::CtrlStmt(Break)),
+        ("continue", ReservedName::CtrlStmt(Continue)),
+        ("default", ReservedName::CtrlStmt(Default)),
     ].into_iter().map(|x| (x.0.to_string(), x.1)).collect()
 }
 

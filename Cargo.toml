@@ -1,4 +1,4 @@
 [package]
-name = "b_compiler"
+name = "b-compiler"
 version = "0.0.1"
 edition = "2018"

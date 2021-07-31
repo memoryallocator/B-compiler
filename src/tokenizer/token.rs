@@ -172,7 +172,7 @@ impl Display for RichBinaryOperation {
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
-pub(crate) enum ControlStatementIdentifier {
+pub(crate) enum CtrlStmtIdent {
     If,
     Else,
     Goto,
@@ -183,6 +183,7 @@ pub(crate) enum ControlStatementIdentifier {
     Break,
     Return,
     Default,
+    Continue,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
@@ -270,7 +271,7 @@ impl Display for Operator {
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub(crate) enum ReservedName {
-    ControlStatement(ControlStatementIdentifier),
+    CtrlStmt(CtrlStmtIdent),
     DeclarationSpecifier(DeclarationSpecifier),
 }
 

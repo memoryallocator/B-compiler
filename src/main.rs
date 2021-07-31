@@ -14,9 +14,34 @@ mod machine_code_generator;
 fn parse_command_line_arguments() -> Result<(String, CompilerOptions, String), String> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        return Err("not enough arguments".to_string());
+        return Err("not enough arguments".to_owned());
     }
-    Ok((args[1].clone(), CompilerOptions::default(), "a.asm".to_string()))
+
+    let mut opts = CompilerOptions::default();
+    let stack_pat = "--stack=";
+    let enable_continue_pat = "--enable-continue";
+    let mut path = None;
+    let mut i: usize = 1;
+    while i < args.len() {
+        let curr = &args[i];
+        if !curr.starts_with("-") {
+            if path.is_some() {
+                return Err("unknown option: ".to_owned() + curr);
+            }
+            path = Some(curr);
+        }
+        if curr.starts_with(stack_pat) {
+            opts.stack_size = curr[stack_pat.len()..].parse::<u64>().unwrap();
+        } else if curr.starts_with(enable_continue_pat) {
+            opts.continue_is_enabled = true;
+        }
+        i += 1;
+    }
+    if let Some(path) = path {
+        Ok((path.clone(), opts, "a.asm".to_owned()))
+    } else {
+        Err("no input path specified".to_owned())
+    }
 }
 
 fn main() {
@@ -88,9 +113,11 @@ fn main() {
 
     let ok: Result<(), io::Error> = (|| {
         let mut output_file = fs::File::create(output_file)?;
-        for line in &res {
+        for (i, line) in res.iter().enumerate() {
             output_file.write(line.as_bytes())?;
-            output_file.write(&['\n' as u8])?;
+            if i < res.len() - 1 {
+                output_file.write(&['\n' as u8])?;
+            }
         }
         Ok(())
     })();

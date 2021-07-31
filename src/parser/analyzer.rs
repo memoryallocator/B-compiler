@@ -497,6 +497,7 @@ impl<'a> Analyzer<'a> {
         let mut res = vec![];
         let mut scope_stack = vec![];
         let mut breakable_stmt_stack = vec![];
+        let mut while_stmt_stack = vec![];
         let mut compound_stack = vec![];
         let mut cases_stack = vec![];
 
@@ -511,14 +512,26 @@ impl<'a> Analyzer<'a> {
                         issues.push(Issue::UnexpectedKeyword(node.pos))
                     }
                 }
+                FlatNode::Continue => {
+                    if while_stmt_stack.is_empty() {
+                        issues.push(Issue::UnexpectedKeyword(node.pos))
+                    }
+                }
 
                 FlatNode::EndOfStmt { positions_away } => {
                     let restore_because_this_stmt_ended = &function[i - positions_away];
 
                     if Some(&restore_because_this_stmt_ended.pos) == breakable_stmt_stack.last() {
-                        if let FlatNode::Switch(_) = restore_because_this_stmt_ended.node {
-                            let cases_for_last_switch = cases_stack.pop();
-                            debug_assert!(cases_for_last_switch.is_some());
+                        match restore_because_this_stmt_ended.node {
+                            FlatNode::Switch(_) => {
+                                let cases_for_last_switch = cases_stack.pop();
+                                debug_assert!(cases_for_last_switch.is_some());
+                            }
+                            FlatNode::While(_) => {
+                                let last_while = while_stmt_stack.pop();
+                                debug_assert!(last_while.is_some());
+                            }
+                            _ => ()
                         }
                         breakable_stmt_stack.pop();
                     } else if let FlatNode::Compound = restore_because_this_stmt_ended.node {
@@ -553,6 +566,7 @@ impl<'a> Analyzer<'a> {
                 FlatNode::While(cond) => {
                     self.process_rvalue(cond, local_scope, issues);
                     breakable_stmt_stack.push(node.pos);
+                    while_stmt_stack.push(node.pos);
                 }
                 FlatNode::Goto(goto) => {
                     self.process_rvalue(goto, local_scope, issues);

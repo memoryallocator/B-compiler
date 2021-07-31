@@ -25,6 +25,7 @@ pub(crate) enum Ival {
 #[derive(Debug)]
 pub(crate) struct FnInfo {
     pub(crate) stack_size: u64,
+    pub(crate) num_of_params: u64,
 }
 
 #[derive(Debug)]
@@ -50,7 +51,7 @@ type LocalVarToNoAndStackRange<'a> = MultiMap<Option<&'a String>, (u64, StackRan
 
 enum StmtRequiringEndMarker<'a> {
     If { cond_is_false_label: u64, after_both_branches: Option<u64> },
-    While { check_condition_label: u64, after_last_stmt: u64 },
+    While { check_cond_label: u64, after_last_stmt: u64 },
     Switch {
         regular_cases: Vec<CaseWithVal>,
         default_case_label: Option<u64>,
@@ -68,11 +69,11 @@ pub(crate) struct IncDec {
 #[derive(Debug)]
 pub(crate) enum RvalueUnary {
     LogicalNot,
-    InvertSign,
+    Minus,
     Complement,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub(crate) enum BinaryOp {
     Div,
     Mod,
@@ -144,6 +145,7 @@ pub(crate) struct IntermediateCodeGenerator<'a> {
     local_scope: Option<&'a LocalScope>,
     stmts_requiring_end_marker: Vec<StmtRequiringEndMarker<'a>>,
     last_breakable_stmt_idxs_stack: Vec<usize>,
+    while_stmt_idxs_stack: Vec<usize>,
     stack_size_in_words: u64,
     params_order: HashMap<&'a String, u64>,
 }
@@ -152,11 +154,6 @@ pub(crate) struct IntermediateCodeGenerator<'a> {
 pub(crate) enum StackRange {
     Exact(u64),
     Span(RangeInclusive<u64>),
-}
-
-enum ShortCircuitOp {
-    And,
-    Or,
 }
 
 fn is_regular_node(node: &FlatNode) -> bool {
@@ -178,12 +175,13 @@ impl<'a> IntermediateCodeGenerator<'a> {
         IntermediateCodeGenerator {
             compiler_options,
             label_counter: 0..=u64::MAX,
-            str_pool: Default::default(),
             global_definitions,
+            str_pool: Default::default(),
             name_to_stack_range: Default::default(),
             local_scope: None,
             stmts_requiring_end_marker: Default::default(),
             last_breakable_stmt_idxs_stack: Default::default(),
+            while_stmt_idxs_stack: Default::default(),
             stack_size_in_words: 0,
             params_order: Default::default(),
         }
@@ -233,49 +231,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
         }
     }
 
-    fn short_circuit(&mut self, op: ShortCircuitOp, out: u64) -> Vec<IntermRepr> {
-        use IntermRepr::*;
-        match op {
-            ShortCircuitOp::And => {
-                vec![TestAndJumpIfZero(out)]
-            }
-            ShortCircuitOp::Or => {
-                let rhs_label = self.label_counter.next().unwrap();
-                vec![TestAndJumpIfZero(rhs_label),
-                     Jump(out),
-                     InternalLabel(rhs_label)]
-            }
-        }
-    }
-
-    fn try_short_circuit(&mut self, op: RichBinaryOperation, rhs: &Rvalue) -> Vec<IntermRepr> {
-        use IntermRepr::*;
-        let mut res = vec![];
-        let out = self.label_counter.next().unwrap();
-
-        if self.compiler_options.short_circuit {
-            let sc_op =
-                match op {
-                    RichBinaryOperation::RegularBinary(BinaryOperation::Or) =>
-                        Some(ShortCircuitOp::Or),
-                    RichBinaryOperation::LogicalAnd => Some(ShortCircuitOp::And),
-                    _ => None,
-                };
-            if let Some(sc_op) = sc_op {
-                self.short_circuit(sc_op, out);
-            }
-        }
-        res.push(Save);
-        res.append(&mut self.process_rvalue(rhs));
-        res.push(BinOp(BinaryOp::from(op)));
-        res.push(InternalLabel(out));
-        res
-    }
-
-    fn process_rvalue(
-        &mut self,
-        rv: &Rvalue,
-    ) -> Vec<IntermRepr> {
+    fn process_rvalue(&mut self, rv: &Rvalue) -> Vec<IntermRepr> {
         use IntermRepr::*;
         match rv {
             Rvalue::Constant(c) => {
@@ -298,18 +254,12 @@ impl<'a> IntermediateCodeGenerator<'a> {
                         match info {
                             ProcessedDeclInfo::Auto { size_if_vec: Some(_) }
                             | ProcessedDeclInfo::ExplicitExtern(
-                                DefInfoAndPos { info: DefInfo::Vector { .. }, .. }
-                            ) => {
-                                return res;  // the rvalue of a vector is its lvalue
-                            }
-                            ProcessedDeclInfo::AssumedExternFnCall(_)
+                                DefInfoAndPos { info: DefInfo::Vector { .. }, .. })
+                            | ProcessedDeclInfo::AssumedExternFnCall(_)
                             | ProcessedDeclInfo::ExplicitExtern(
-                                DefInfoAndPos { info: DefInfo::Function { .. }, .. }
-                            ) => {
-                                return res;  // the rvalue of a function is its lvalue
-                            }
-                            ProcessedDeclInfo::Label => {
-                                return res;  // the rvalue of a label is its lvalue
+                                DefInfoAndPos { info: DefInfo::Function { .. }, .. })
+                            | ProcessedDeclInfo::Label => {
+                                return res;
                             }
                             _ => (),
                         }
@@ -325,7 +275,9 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 res.push(Save);
                 if let Some(bin_op) = assign.bin_op {
                     res.push(Deref);
-                    res.append(&mut self.try_short_circuit(bin_op, &rhs.rvalue));
+                    res.push(Save);
+                    res.append(&mut self.process_rvalue(rhs.rvalue.as_ref()));
+                    res.push(BinOp(BinaryOp::from(bin_op)));
                 } else {
                     res.append(&mut self.process_rvalue(&rhs.rvalue))
                 }
@@ -334,7 +286,9 @@ impl<'a> IntermediateCodeGenerator<'a> {
             }
             Rvalue::Binary { lhs, bin_op, rhs } => {
                 let mut res = self.process_rvalue(&lhs.rvalue);
-                res.append(&mut self.try_short_circuit(*bin_op, &rhs.rvalue));
+                res.push(Save);
+                res.append(&mut self.process_rvalue(&rhs.rvalue));
+                res.push(BinOp(BinaryOp::from(*bin_op)));
                 res
             }
             Rvalue::IncDec(
@@ -352,7 +306,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
             Rvalue::Unary(un, rv) => {
                 let mut res = self.process_rvalue(&rv.rvalue);
                 match un {
-                    Unary::Minus => res.push(RvUnary(RvalueUnary::InvertSign)),
+                    Unary::Minus => res.push(RvUnary(RvalueUnary::Minus)),
                     Unary::LogicalNot => res.push(RvUnary(RvalueUnary::LogicalNot)),
                     Unary::Complement => res.push(RvUnary(RvalueUnary::Complement)),
                     Unary::Plus => (),
@@ -389,6 +343,8 @@ impl<'a> IntermediateCodeGenerator<'a> {
                     res.append(&mut self.process_rvalue(&arg.rvalue));
                     res.push(Save);
                 }
+                res.push(LoadConstant(arguments.len().try_into().unwrap()));
+                res.push(Save);
                 res.append(&mut self.process_rvalue(&fn_name.rvalue));
                 res.push(Call { nargs: arguments.len().try_into().unwrap() });
                 res
@@ -468,6 +424,15 @@ impl<'a> IntermediateCodeGenerator<'a> {
                     unreachable!()
                 }
             }
+            FlatNode::Continue => {
+                let idx = self.while_stmt_idxs_stack.last().unwrap();
+                let last_wh_stmt = &self.stmts_requiring_end_marker[*idx];
+                if let StmtRequiringEndMarker::While { check_cond_label, .. } = last_wh_stmt {
+                    vec![Jump(*check_cond_label)]
+                } else {
+                    unreachable!()
+                }
+            }
             FlatNode::Goto(rv) => {
                 let mut res = self.process_rvalue(rv);
                 res.push(Goto);
@@ -542,18 +507,19 @@ impl<'a> IntermediateCodeGenerator<'a> {
                     }
 
                     FlatNode::While(rv) => {
-                        let check_condition_label = self.label_counter.next().unwrap();
-                        res.push(InternalLabel(check_condition_label));
+                        let check_cond_label = self.label_counter.next().unwrap();
+                        res.push(InternalLabel(check_cond_label));
                         let cond_is_false_label = self.label_counter.next().unwrap();
                         let r#while = StmtRequiringEndMarker::While {
-                            check_condition_label,
+                            check_cond_label,
                             after_last_stmt: cond_is_false_label,
                         };
                         res.append(&mut self.process_rvalue(rv));
                         res.push(TestAndJumpIfZero(cond_is_false_label));
 
-                        self.last_breakable_stmt_idxs_stack.push(
-                            self.stmts_requiring_end_marker.len());
+                        let idx = self.stmts_requiring_end_marker.len();
+                        self.while_stmt_idxs_stack.push(idx);
+                        self.last_breakable_stmt_idxs_stack.push(idx);
                         self.stmts_requiring_end_marker.push(r#while)
                     }
 
@@ -590,10 +556,12 @@ impl<'a> IntermediateCodeGenerator<'a> {
                                 }
                             }
                             StmtRequiringEndMarker::While {
-                                check_condition_label,
+                                check_cond_label: check_condition_label,
                                 after_last_stmt
                             } => {
-                                self.last_breakable_stmt_idxs_stack.pop();
+                                let wh = self.while_stmt_idxs_stack.pop();
+                                let br = self.last_breakable_stmt_idxs_stack.pop();
+                                debug_assert!(wh.is_some() && br.is_some());
                                 res.push(Jump(check_condition_label));
                                 res.push(InternalLabel(after_last_stmt));
                             }
@@ -616,6 +584,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                                 }
                                 case_table.append(&mut res);
                                 res = case_table;
+                                res.push(InternalLabel(after_last_stmt));
                             }
                         }
                         return (res, i + 1);
@@ -651,7 +620,10 @@ impl<'a> IntermediateCodeGenerator<'a> {
             self.params_order = params.iter().enumerate().map(|(i, (param, _))| {
                 (param, i.try_into().unwrap())
             }).collect();
-            res.push(FnDef(name.clone(), FnInfo { stack_size: 0 }))
+            res.push(FnDef(name.clone(), FnInfo {
+                stack_size: 0,
+                num_of_params: params.len() as u64,
+            }))
         } else {
             unreachable!()
         }

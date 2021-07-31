@@ -234,6 +234,9 @@ pub(crate) struct RvalueAndSemicolonNode {
 pub(crate) struct BreakNode {}
 
 #[derive(Debug)]
+pub(crate) struct ContinueNode {}
+
+#[derive(Debug)]
 pub(crate) enum DeclarationNode {
     AutoDeclaration(AutoDeclarationNode),
     ExternDeclaration(ExternDeclarationNode),
@@ -253,6 +256,7 @@ pub(crate) enum Statement {
     Goto(GotoNode),
     RvalueAndSemicolon(RvalueAndSemicolonNode),
     Break(BreakNode),
+    Continue(ContinueNode),
 }
 
 #[derive(Debug)]

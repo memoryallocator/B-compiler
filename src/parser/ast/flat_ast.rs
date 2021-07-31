@@ -75,6 +75,7 @@ pub(crate) enum FlatNode {
     While(Rvalue),
     Switch(Rvalue),
     Break,
+    Continue,
     Goto(Rvalue),
     Case(Option<ConstantNode>),
     Return(Option<Rvalue>),
@@ -238,6 +239,10 @@ impl FlattenNode for StatementNode {
 
             Statement::Break(_br) => {
                 vec![FlatNodeAndPos { node: FlatNode::Break, pos: self.position }]
+            }
+
+            Statement::Continue(_cn) => {
+                vec![FlatNodeAndPos { node: FlatNode::Continue, pos: self.position }]
             }
         };
 

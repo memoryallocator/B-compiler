@@ -111,7 +111,7 @@ fn parse_operator<'a, I>(op: I) -> Option<(Operator, usize)>
 pub(crate) fn char_to_u64(char: &str) -> u64 {
     let mut char_as_u64: u64 = 0;
     for (i, char) in char.chars().enumerate() {
-        char_as_u64 |= (char as u64) << (i * 8);
+        char_as_u64 |= (char as u64).wrapping_shl((i * 8) as u32);
     }
     char_as_u64
 }
@@ -242,13 +242,19 @@ impl Tokenizer<'_> {
                 if let Some(name) = read_name(&source_code[i..]) {
                     let name_len = name.len();
                     if name_len > 0 {
-                        if let Some(
-                            keyword
-                        ) = self.reserved_symbols.get(&name) {
-                            res.push(Token {
-                                token: WrappedToken::ReservedName(*keyword),
-                                pos: token_pos,
-                            });
+                        if let Some(keyword) = self.reserved_symbols.get(&name) {
+                            if *keyword == ReservedName::CtrlStmt(CtrlStmtIdent::Continue)
+                                && !self.compiler_options.continue_is_enabled {
+                                res.push(Token {
+                                    token: WrappedToken::Name(name),
+                                    pos: token_pos
+                                })
+                            } else {
+                                res.push(Token {
+                                    token: WrappedToken::ReservedName(*keyword),
+                                    pos: token_pos,
+                                });
+                            }
                         } else {
                             res.push(Token {
                                 token: WrappedToken::Name(name),

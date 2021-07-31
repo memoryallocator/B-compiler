@@ -506,13 +506,13 @@ impl Parse for SwitchNode {
         if input.len() < 5 {  // switch ( rvalue ) null_stmt
             return Err(vec![StmtTooShort(input[0].pos)]);
         }
-        use ControlStatementIdentifier::Switch;
+        use CtrlStmtIdent::Switch;
 
         let left_br_idx = 1;
         return match &input[..left_br_idx + 1] {
             [
             Token {
-                token: WrappedToken::ReservedName(ReservedName::ControlStatement(Switch)), ..
+                token: WrappedToken::ReservedName(ReservedName::CtrlStmt(Switch)), ..
             },
             Token {
                 token: WrappedToken::Bracket(
@@ -552,13 +552,13 @@ impl Parse for CaseNode {
             return Err(vec![StmtTooShort(input[0].pos)]);
         }
 
-        use token::ControlStatementIdentifier::{Case, Default};
+        use token::CtrlStmtIdent::{Case, Default};
 
         let pos = input[0].pos;
         let colon_pos: usize;
         let constant =
             match input[0].token {
-                WrappedToken::ReservedName(ReservedName::ControlStatement(Case)) => {
+                WrappedToken::ReservedName(ReservedName::CtrlStmt(Case)) => {
                     colon_pos = 2;
                     let constant = ConstantNode::parse_exact(&input[1..=1])?;
                     if let ConstantNode { constant: Constant::Number(_), .. } = constant {
@@ -567,7 +567,7 @@ impl Parse for CaseNode {
                         return Err(vec![WrongConstant(pos)]);
                     }
                 }
-                WrappedToken::ReservedName(ReservedName::ControlStatement(Default)) => {
+                WrappedToken::ReservedName(ReservedName::CtrlStmt(Default)) => {
                     colon_pos = 1;
                     None
                 }
@@ -598,10 +598,10 @@ impl Parse for IfNode {
             return Err(vec![StmtTooShort(input[0].pos)]);
         }
 
-        use token::ControlStatementIdentifier::{If, Else};
+        use token::CtrlStmtIdent::{If, Else};
         use token::BracketType::Round;
 
-        if input[0].token != WrappedToken::ReservedName(ReservedName::ControlStatement(If)) {
+        if input[0].token != WrappedToken::ReservedName(ReservedName::CtrlStmt(If)) {
             return Err(vec![ExpectedTokenNotFound(input[0].pos)]);
         }
 
@@ -613,7 +613,7 @@ impl Parse for IfNode {
 
         let r#else =
             if let Some(tok) = input.get(toks_consumed) {
-                if tok.token == WrappedToken::ReservedName(ReservedName::ControlStatement(Else)) {
+                if tok.token == WrappedToken::ReservedName(ReservedName::CtrlStmt(Else)) {
                     toks_consumed += 1;
                     if toks_consumed == input.len() {
                         return Err(vec![StmtTooShort(input.last().unwrap().pos)]);
@@ -645,9 +645,9 @@ impl Parse for WhileNode {
         if input.len() < 5 {  // while ( x ) ;
             return Err(vec![StmtTooShort(input[0].pos)]);
         }
-        use ControlStatementIdentifier::While;
+        use CtrlStmtIdent::While;
         use BracketType::Round;
-        if input[0].token != WrappedToken::ReservedName(ReservedName::ControlStatement(While)) {
+        if input[0].token != WrappedToken::ReservedName(ReservedName::CtrlStmt(While)) {
             return Err(vec![ExpectedTokenNotFound(input[0].pos)]);
         }
 
@@ -734,9 +734,9 @@ impl Parse for GotoNode {
             return Err(vec![StmtTooShort(pos)]);
         }
 
-        use token::ControlStatementIdentifier::Goto;
+        use token::CtrlStmtIdent::Goto;
 
-        if input[0].token != WrappedToken::ReservedName(ReservedName::ControlStatement(Goto)) {
+        if input[0].token != WrappedToken::ReservedName(ReservedName::CtrlStmt(Goto)) {
             return Err(vec![ExpectedTokenNotFound(pos)]);
         }
 
@@ -757,9 +757,9 @@ impl Parse for ReturnNode {
         debug_assert!(!input.is_empty());
 
         use BracketType::Round;
-        use ControlStatementIdentifier::Return;
+        use CtrlStmtIdent::Return;
 
-        if input[0].token != WrappedToken::ReservedName(ReservedName::ControlStatement(Return)) {
+        if input[0].token != WrappedToken::ReservedName(ReservedName::CtrlStmt(Return)) {
             return Err(vec![ExpectedTokenNotFound(input[0].pos)]);
         }
 
@@ -803,12 +803,36 @@ impl Parse for BreakNode {
             return Err(vec![StmtTooShort(input[0].pos)]);
         }
 
-        use token::ControlStatementIdentifier::Break;
+        use token::CtrlStmtIdent::Break;
 
         match &input[..2] {
-            [Token { token: WrappedToken::ReservedName(ReservedName::ControlStatement(Break)), .. },
+            [Token {
+                token: WrappedToken::ReservedName(
+                    ReservedName::CtrlStmt(Break)), ..
+            },
             Token { token: WrappedToken::Semicolon, .. }] =>
                 Ok((BreakNode {}, 2)),
+            _ => Err(vec![ExpectedTokenNotFound(input[1].pos)])
+        }
+    }
+}
+
+impl Parse for ContinueNode {
+    fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>
+        where Self: Sized {
+        if input.len() < 2 {  // break ;
+            return Err(vec![StmtTooShort(input[0].pos)]);
+        }
+
+        use token::CtrlStmtIdent::Continue;
+
+        match &input[..2] {
+            [Token {
+                token: WrappedToken::ReservedName(
+                    ReservedName::CtrlStmt(Continue)), ..
+            },
+            Token { token: WrappedToken::Semicolon, .. }] =>
+                Ok((ContinueNode {}, 2)),
             _ => Err(vec![ExpectedTokenNotFound(input[1].pos)])
         }
     }
@@ -853,9 +877,9 @@ impl Parse for Statement {
         let pos = t.pos;
         match &t.token {
             ReservedName(res_name) => {
-                use ControlStatementIdentifier::*;
+                use CtrlStmtIdent::*;
                 match res_name {
-                    token::ReservedName::ControlStatement(cs) => {
+                    token::ReservedName::CtrlStmt(cs) => {
                         match cs {
                             If => {
                                 let (r#if, adv) = IfNode::parse(input)?;
@@ -879,6 +903,10 @@ impl Parse for Statement {
                             Break => {
                                 let (r#break, adv) = BreakNode::parse(input)?;
                                 Ok((Statement::Break(r#break), adv))
+                            }
+                            Continue => {
+                                let (r#break, adv) = ContinueNode::parse(input)?;
+                                Ok((Statement::Continue(r#break), adv))
                             }
                             Return => {
                                 let (r#return, adv) = ReturnNode::parse(input)?;
