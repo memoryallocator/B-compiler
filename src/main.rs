@@ -19,6 +19,7 @@ fn parse_command_line_arguments() -> Result<(String, CompilerOptions, String), S
 
     let mut opts = CompilerOptions::default();
     let stack_pat = "--stack=";
+    let heap_pat = "--heap=";
     let enable_continue_pat = "--enable-continue";
     let mut path = None;
     let mut i: usize = 1;
@@ -30,10 +31,22 @@ fn parse_command_line_arguments() -> Result<(String, CompilerOptions, String), S
             }
             path = Some(curr);
         }
-        if curr.starts_with(stack_pat) {
-            opts.stack_size = curr[stack_pat.len()..].parse::<u64>().unwrap();
-        } else if curr.starts_with(enable_continue_pat) {
+        if curr.starts_with(enable_continue_pat) {
             opts.continue_is_enabled = true;
+        } else if curr.starts_with(heap_pat) {
+            let heap_size = curr[heap_pat.len()..].parse::<u64>();
+            if let Ok(heap_size) = heap_size {
+                opts.heap_size = heap_size;
+            } else {
+                return Err("failed to parse heap size".to_owned());
+            }
+        } else if curr.starts_with(stack_pat) {
+            let stack_size = curr[stack_pat.len()..].parse::<u64>();
+            if let Ok(stack_size) = stack_size {
+                opts.stack_size = stack_size;
+            } else {
+                return Err("failed to parse stack size".to_owned());
+            }
         }
         i += 1;
     }

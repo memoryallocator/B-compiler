@@ -116,7 +116,7 @@ impl<'a> Analyzer<'a> {
         let explicit_decl_type;
         let decl_info;
         match &decl.info {
-            FlatDeclarationNameInfo::Auto { size_if_vec } => {
+            FlatDeclarationNameInfo::Auto { specified_size_if_vec: size_if_vec } => {
                 explicit_decl_type = ExplicitDeclType::Auto;
                 decl_info = ProcessedDeclInfo::Auto {
                     size_if_vec: {

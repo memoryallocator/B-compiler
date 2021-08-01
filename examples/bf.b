@@ -3,11 +3,17 @@ TAPE_SIZE 30000;
 CELL_SIZE 256;
 
 free(v) {
+    if (v == 0) {
+        return;
+    }
     rlsevec(v, -1);
 }
 
 realloc(v, n) {
-    auto new; new = getvec(n);
+    if (n == 0) {
+        return;
+    }
+    auto new; new = getvec(n - 1);
     auto i; i = 0;
     while (i < n) {
         new[i] = v[i];
@@ -27,14 +33,14 @@ advance_back(arr, i) {
     auto n; n = 0;
     while (i != 0) {
         switch (arr[i]) {
+            case ']':
+                --n;
+                break;
             case '[':
                 if (n == 0) {
                     return ( i );
                 }
                 ++n;
-                break;
-            case ']':
-                --n;
                 break;
             default:
                 break;
@@ -93,7 +99,6 @@ print_num(c) {
             break;
         }
     }
-    auto len; len = i;
     --i;
     while (i >= 0) {
         putchar('0' + d[i]);
@@ -104,7 +109,7 @@ print_num(c) {
 main() {
     extrn DEBUG;
     extrn TAPE_SIZE, CELL_SIZE;
-    auto tape; tape = getvec(TAPE_SIZE);
+    auto tape; tape = getvec(TAPE_SIZE - 1);
     if (DEBUG) {
         putchar('&tape = ');
         print_num(&tape << 3);
@@ -128,8 +133,6 @@ main() {
             print_num(command_idx);
             putchar('*ncl = ');
             print_num(commands_len);
-            putchar('*n');
-            print_num(tape << 3);
             putchar('*ni = ');
             print_num(i);
             putchar('*ninstr =');

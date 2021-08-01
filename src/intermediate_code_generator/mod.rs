@@ -367,20 +367,20 @@ impl<'a> IntermediateCodeGenerator<'a> {
                         vec![DeclLabel(decl.name.clone())]
                     }
 
-                    FlatDeclarationNameInfo::Auto { size_if_vec } => {
+                    FlatDeclarationNameInfo::Auto { specified_size_if_vec } => {
                         let local_var_no = self.name_to_stack_range
                             .total_items()
                             .try_into()
                             .unwrap();
                         if let Some(
-                            ConstantNode { constant: token::Constant::Number(size), .. }
-                        ) = size_if_vec {
-                            let upper = self.stack_size_in_words + size - 1;
+                            ConstantNode { constant: token::Constant::Number(spec_size), .. }
+                        ) = specified_size_if_vec {
+                            let upper = self.stack_size_in_words + spec_size;
                             let span = StackRange::Span(self.stack_size_in_words..=upper);
 
                             self.name_to_stack_range.insert(Some(&decl.name),
                                                             (local_var_no, span));
-                            self.stack_size_in_words += size;
+                            self.stack_size_in_words = upper + 1;
                         } else {
                             self.name_to_stack_range.insert(
                                 Some(&decl.name),

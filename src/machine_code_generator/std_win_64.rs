@@ -68,7 +68,8 @@ pub(crate) fn generate_std_lib_and_internals(already_defined: HashSet<&str>) -> 
                         sub rsp, 4 * 8
                         call [ReadFile]
                         add rsp, 6 * 8
-                        mov rax, [rsp + 8]
+                        xor rax, rax
+                        mov al, [rsp + 8]
                         ret", stdin)
                     }
                     "exit" => {
@@ -87,12 +88,10 @@ pub(crate) fn generate_std_lib_and_internals(already_defined: HashSet<&str>) -> 
                     "getvec" => {
                         format!(r"
                         inc rdx
-                        mov rax, rdx
-                        mov r8, 8
-                        mul r8
+                        mov r8, rdx
+                        shl r8, 3
                         mov rcx, [{}]
                         mov rdx, 0x00000008  ; HEAP_ZERO_MEMORY
-                        mov r8, rax
                         sub rsp, 5 * 8
                         call [HeapAlloc]
                         add rsp, 5 * 8

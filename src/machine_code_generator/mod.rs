@@ -302,8 +302,8 @@ impl MachineCodeGenerator {
         let mut res =
             match target {
                 WIN_64 => vec!["format PE64 console".to_owned(),
-                               format!("stack {}", comp_opts.stack_size),
-                               format!("heap {}", comp_opts.heap_size)],
+                               format!("stack {},{0}", comp_opts.stack_size),
+                               format!("heap {},{0}", comp_opts.heap_size)],
                 TargetPlatform {
                     platform_name: PlatformName::Linux, arch: Arch::x86_64
                 } => todo!(),

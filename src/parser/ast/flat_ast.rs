@@ -52,7 +52,7 @@ pub(crate) struct FlatDefinition {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum FlatDeclarationNameInfo {
-    Auto { size_if_vec: Option<ConstantNode> },
+    Auto { specified_size_if_vec: Option<ConstantNode> },
     Extern,
     Label,
 }
@@ -297,7 +297,7 @@ impl FlattenNode for AutoDeclaration {
         vec![FlatNodeAndPos {
             node: FlatNode::Decl(
                 FlatDeclaration {
-                    info: FlatDeclarationNameInfo::Auto { size_if_vec: self.size_if_vector },
+                    info: FlatDeclarationNameInfo::Auto { specified_size_if_vec: self.size_if_vector },
                     name: self.name,
                 }),
             pos: self.position,
