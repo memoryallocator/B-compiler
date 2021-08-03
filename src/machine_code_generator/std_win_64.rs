@@ -115,7 +115,7 @@ pub(crate) fn generate_std_lib_and_internals(already_defined: HashSet<&str>) -> 
         }
     }
     res.push(readable_writable_section_or_segment(TARGET).to_owned());
-    res.append(&mut vec![format!("{} dq ?", stdout), format!("{} dq ?", stdin)]);
+    res.extend(vec![format!("{} dq ?", stdout), format!("{} dq ?", stdin)]);
     res.push(format!("{} dq ?", proc_heap));
 
     res.push(executable_section_or_segment(TARGET).to_owned());

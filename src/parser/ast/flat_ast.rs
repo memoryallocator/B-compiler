@@ -150,7 +150,7 @@ impl FlattenNode for FunctionDefinitionNode {
             }),
             pos: self.position,
         }];
-        res.append(&mut self.body.flatten_node());
+        res.extend(self.body.flatten_node());
         res
     }
 }
@@ -188,7 +188,7 @@ impl FlattenNode for StatementNode {
                         node: FlatNode::Switch(*sw.rvalue.rvalue),
                         pos: self.position,
                     }];
-                res.append(&mut sw.body.flatten_node());
+                res.extend(sw.body.flatten_node());
                 res
             }
 
@@ -197,7 +197,7 @@ impl FlattenNode for StatementNode {
                     pos: self.position,
                     node: FlatNode::Case(cs.constant_if_not_default),
                 }];
-                res.append(&mut cs.next_statement.flatten_node());
+                res.extend(cs.next_statement.flatten_node());
                 res
             }
 
@@ -207,14 +207,14 @@ impl FlattenNode for StatementNode {
                         node: FlatNode::If(*r#if.condition.rvalue),
                         pos: self.position,
                     }];
-                res.append(&mut r#if.body.flatten_node());
+                res.extend(r#if.body.flatten_node());
 
                 if let Some(else_node) = r#if.r#else {
                     res.push(FlatNodeAndPos {
                         node: FlatNode::Else,
                         pos: else_node.position,
                     });
-                    res.append(&mut else_node.else_body.flatten_node());
+                    res.extend(else_node.else_body.flatten_node());
                 }
                 res
             }
@@ -225,7 +225,7 @@ impl FlattenNode for StatementNode {
                         node: FlatNode::While(*wh.condition.rvalue),
                         pos: self.position,
                     }];
-                res.append(&mut wh.body.flatten_node());
+                res.extend(wh.body.flatten_node());
                 res
             }
 
@@ -259,13 +259,13 @@ impl FlattenNode for StatementNode {
 impl FlattenNode for CompoundStatementNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
         let mut res = vec![FlatNodeAndPos { node: FlatNode::Compound, pos: self.position }];
-        let mut body: Vec<FlatNodeAndPos> = self.statement_list
+        let body: Vec<FlatNodeAndPos> = self.statement_list
             .into_iter()
             .map(|stmt| stmt.flatten_node())
             .flatten()
             .collect();
 
-        res.append(&mut body);
+        res.extend(body);
         res
     }
 }
@@ -287,7 +287,7 @@ impl FlattenNode for AutoDeclarationNode {
             .map(|auto_decl| auto_decl.flatten_node())
             .flatten()
             .collect::<Vec<FlatNodeAndPos>>();
-        res.append(&mut self.next_statement.flatten_node());
+        res.extend(self.next_statement.flatten_node());
         res
     }
 }
@@ -318,7 +318,7 @@ impl FlattenNode for ExternDeclarationNode {
                 pos,
             })
             .collect::<Vec<FlatNodeAndPos>>();
-        res.append(&mut self.next_statement.flatten_node());
+        res.extend(self.next_statement.flatten_node());
         res
     }
 }
@@ -332,7 +332,7 @@ impl FlattenNode for LabelDeclarationNode {
             }),
             pos: self.position,
         }];
-        res.append(&mut self.next_statement.flatten_node());
+        res.extend(self.next_statement.flatten_node());
         res
     }
 }

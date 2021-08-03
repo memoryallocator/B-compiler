@@ -466,7 +466,7 @@ pub(crate) enum StdNameInfo {
 pub(crate) fn get_standard_library_names() -> HashMap<&'static str, StdNameInfo> {
     let mut std_lib_fns_with_exact_num_of_params = Vec::<(&'static str, usize)>::new();
 
-    std_lib_fns_with_exact_num_of_params.append(&mut
+    std_lib_fns_with_exact_num_of_params.extend(
         vec![
             ("getchar", 0),
             ("putchar", 1),
@@ -482,14 +482,14 @@ pub(crate) fn get_standard_library_names() -> HashMap<&'static str, StdNameInfo>
 
     std_lib_fns_with_exact_num_of_params.push(("ioerrors", 1));
 
-    std_lib_fns_with_exact_num_of_params.append(&mut
+    std_lib_fns_with_exact_num_of_params.extend(
         vec![
             ("char", 2),
             ("lchar", 3),
             ("getarg", 3),
         ]);
 
-    std_lib_fns_with_exact_num_of_params.append(&mut
+    std_lib_fns_with_exact_num_of_params.extend(
         vec![
             ("getvec", 1),
             ("rlsevec", 2),

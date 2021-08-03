@@ -594,47 +594,47 @@ impl Parse for RvalueNode {
                 let mut res = Vec::<(Operator, i32)>::new();
 
                 {
-                    let mut multiplicative_ops = map_priority(
+                    let multiplicative_ops = map_priority(
                         vec![Asterisk,
                              Binary(Div),
                              Binary(Mod)], 100);
 
-                    res.append(&mut multiplicative_ops);
+                    res.extend(multiplicative_ops);
                 }
 
                 {
-                    let mut additive_ops = map_priority(
+                    let additive_ops = map_priority(
                         vec![Plus,
                              Minus,
                              Binary(Mod)], 90);
 
-                    res.append(&mut additive_ops);
+                    res.extend(additive_ops);
                 }
 
                 {
-                    let mut shift_ops = map_priority(
+                    let shift_ops = map_priority(
                         vec![Binary(Shift(Left)),
                              Binary(Shift(Right))], 80);
 
-                    res.append(&mut shift_ops);
+                    res.extend(shift_ops);
                 }
 
                 {
-                    let mut rel_ops = map_priority(
+                    let rel_ops = map_priority(
                         vec![Binary(Cmp(Lt)),
                              Binary(Cmp(Le)),
                              Binary(Cmp(Gt)),
                              Binary(Cmp(Ge))], 70);
 
-                    res.append(&mut rel_ops);
+                    res.extend(rel_ops);
                 }
 
                 {
-                    let mut eq_ops = map_priority(
+                    let eq_ops = map_priority(
                         vec![Binary(Cmp(Eq)),
                              Binary(Cmp(Ne))], 60);
 
-                    res.append(&mut eq_ops);
+                    res.extend(eq_ops);
                 }
 
                 {

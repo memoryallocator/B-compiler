@@ -269,7 +269,7 @@ impl MachineCodeGenerator {
                 res.push(format!("setnz {}", main_lower_byte));
 
                 res.push(format!("push {}", snd_supp));
-                res.append(&mut self.bin_op_to_machine_code(BinaryOp::BitwiseAnd));
+                res.extend(self.bin_op_to_machine_code(BinaryOp::BitwiseAnd));
             }
 
             b => {
@@ -353,13 +353,13 @@ impl MachineCodeGenerator {
                 WriteLvalue => {
                     let supp_reg = supp_regs[0];
                     res.push(format!("pop {}", supp_reg));
-                    res.append(&mut self.write_lvalue(supp_reg, main_reg));
+                    res.extend( self.write_lvalue(supp_reg, main_reg));
                 }
                 LoadConstant(constant) => {
                     res.push(format!("mov {},{}", main_reg, constant))
                 }
                 Deref => {
-                    res.append(&mut self.deref_to_reg(main_reg, main_reg));
+                    res.extend( self.deref_to_reg(main_reg, main_reg));
                 }
                 DeclLabel(lbl) => {
                     res.push(format!("align {}", word_size));
@@ -390,23 +390,23 @@ impl MachineCodeGenerator {
                     match un.inc_dec_type {
                         IncDecType::Prefix => {
                             let supp_reg = supp_regs[0];
-                            res.append(&mut self.deref_to_reg(supp_reg, main_reg));
+                            res.extend( self.deref_to_reg(supp_reg, main_reg));
                             res.push(
                                 match un.inc_or_dec {
                                     IncOrDec::Increment => "inc",
                                     IncOrDec::Decrement => "dec",
                                 }.to_owned() + " " + supp_reg);
-                            res.append(&mut self.write_lvalue(main_reg, supp_reg));
+                            res.extend( self.write_lvalue(main_reg, supp_reg));
                         }
                         IncDecType::Postfix => {
                             let supp_reg = supp_regs[0];
-                            res.append(&mut self.deref_to_reg(supp_reg, main_reg));
+                            res.extend( self.deref_to_reg(supp_reg, main_reg));
                             res.push(
                                 match un.inc_or_dec {
                                     IncOrDec::Increment => "inc",
                                     IncOrDec::Decrement => "dec",
                                 }.to_owned() + " " + supp_reg);
-                            res.append(&mut self.write_lvalue(supp_reg, supp_reg));
+                            res.extend( self.write_lvalue(supp_reg, supp_reg));
                         }
                     }
                 }
@@ -428,7 +428,7 @@ impl MachineCodeGenerator {
                     }
                 }
                 Call { nargs } => {
-                    res.append(&mut self.align_and_call(*nargs + 1))
+                    res.extend( self.align_and_call(*nargs + 1))
                 }
                 Nargs => {
                     res.push(format!("lea {},[{}+{}*(2+1)]", main_reg,
@@ -490,7 +490,7 @@ impl MachineCodeGenerator {
                     }
                 }
                 BinOp(bin_op) => {
-                    res.append(&mut self.bin_op_to_machine_code(*bin_op))
+                    res.extend( self.bin_op_to_machine_code(*bin_op))
                 }
             }
         }
@@ -515,7 +515,7 @@ impl MachineCodeGenerator {
                 res.push(format!("{}:", pooled_str_end(*n)))
             }
         }
-        res.append(&mut self.generate_std_lib_and_internals(user_defined));
+        res.extend( self.generate_std_lib_and_internals(user_defined));
         match self.compiler_options.target_platform {
             WIN_64 => {
                 res.extend(r"

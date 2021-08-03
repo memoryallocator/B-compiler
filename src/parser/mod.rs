@@ -484,10 +484,13 @@ fn extract_bracketed_rvalue(
     if let Token {
         token: WrappedToken::Bracket(
             Bracket {
-                left_or_right: LeftOrRight::Left, ..
+                left_or_right: LeftOrRight::Left, bracket_type, ..
             }
         ), pos
     } = first {
+        if *bracket_type != br_type {
+            return Err(vec![ExpectedTokenNotFound(first.pos)]);
+        }
         let br_expr = extract_bracketed_expression(tokens)?;
         if br_expr.is_empty() {
             return Err(vec![EmptyBracketedExpr(*pos)]);
@@ -1041,24 +1044,12 @@ impl<K: Eq + Hash + Clone, V: Clone> TryFrom<MultiMap<K, V>> for HashMap<K, V> {
 }
 
 impl<K: Eq + Hash, V> MultiMap<K, V> {
-    pub fn new() -> Self {
-        MultiMap { data: Default::default(), size: 0 }
-    }
-
     fn get_inner(&self) -> &HashMap<K, Vec<V>> {
         &self.data
     }
 
-    pub fn extract_inner(self) -> HashMap<K, Vec<V>> {
-        self.data
-    }
-
     pub fn total_items(&self) -> usize {
         self.size
-    }
-
-    pub fn key_count(&self) -> usize {
-        self.get_inner().len()
     }
 
     pub fn insert(&mut self, key: K, value: V) {
@@ -1073,11 +1064,6 @@ impl<K: Eq + Hash, V> MultiMap<K, V> {
     pub fn get_last<Q: ?Sized>(&self, k: &Q) -> Option<&V>
         where K: Borrow<Q>, Q: Hash + Eq {
         self.data.get(k)?.last()
-    }
-
-    pub fn contains_key<Q: ?Sized>(&self, k: &Q) -> bool
-        where K: Borrow<Q>, Q: Hash + Eq {
-        self.get_inner().contains_key(k)
     }
 }
 
@@ -1106,7 +1092,6 @@ impl Parser<'_> {
         let mut stack = vec![];
         let mut processed_tokens = vec![];
         let mut tok_it = tok_it.enumerate();
-        //  Vec::<(&Bracket, &TokenPos, usize)>::new()
 
         while let Some((i, token)) = tok_it.next() {
             if let Token {
@@ -1179,8 +1164,8 @@ impl Parser<'_> {
 
         let prog_node = ProgramNode::parse_exact(&tokens);
         match prog_node {
-            Err(mut err) => {
-                issues.append(&mut err);
+            Err(err) => {
+                issues.extend(err);
                 return Err(());
             }
             Ok(prog_node) => {

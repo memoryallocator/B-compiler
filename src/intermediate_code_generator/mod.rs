@@ -224,7 +224,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
             ast::Lvalue::Indexing { vector, index } => {
                 let mut res = self.process_rvalue(&vector.rvalue);
                 res.push(Save);
-                res.append(&mut self.process_rvalue(&index.rvalue));
+                res.extend(self.process_rvalue(&index.rvalue));
                 res.push(BinOp(BinaryOp::Add));
                 res
             }
@@ -276,10 +276,10 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 if let Some(bin_op) = assign.bin_op {
                     res.push(Deref);
                     res.push(Save);
-                    res.append(&mut self.process_rvalue(rhs.rvalue.as_ref()));
+                    res.extend(self.process_rvalue(rhs.rvalue.as_ref()));
                     res.push(BinOp(BinaryOp::from(bin_op)));
                 } else {
-                    res.append(&mut self.process_rvalue(&rhs.rvalue))
+                    res.extend(self.process_rvalue(&rhs.rvalue))
                 }
                 res.push(WriteLvalue);
                 res
@@ -287,7 +287,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
             Rvalue::Binary { lhs, bin_op, rhs } => {
                 let mut res = self.process_rvalue(&lhs.rvalue);
                 res.push(Save);
-                res.append(&mut self.process_rvalue(&rhs.rvalue));
+                res.extend(self.process_rvalue(&rhs.rvalue));
                 res.push(BinOp(BinaryOp::from(*bin_op)));
                 res
             }
@@ -321,9 +321,9 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 let on_false_label = self.label_counter.next().unwrap();
                 let mut res = self.process_rvalue(&condition.rvalue);
                 res.push(TestAndJumpIfZero(on_false_label));
-                res.append(&mut self.process_rvalue(&on_true.rvalue));
+                res.extend(self.process_rvalue(&on_true.rvalue));
                 res.push(Jump(out));
-                res.append(&mut self.process_rvalue(&on_false.rvalue));
+                res.extend(self.process_rvalue(&on_false.rvalue));
                 res.push(InternalLabel(out));
                 res
             }
@@ -344,12 +344,12 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 }
                 let mut res = vec![];
                 for arg in arguments.iter().rev() {
-                    res.append(&mut self.process_rvalue(&arg.rvalue));
+                    res.extend(self.process_rvalue(&arg.rvalue));
                     res.push(Save);
                 }
                 res.push(LoadConstant(arguments.len().try_into().unwrap()));
                 res.push(Save);
-                res.append(&mut self.process_rvalue(&fn_name.rvalue));
+                res.extend(self.process_rvalue(&fn_name.rvalue));
                 res.push(Call { nargs: arguments.len().try_into().unwrap() });
                 res
             }
@@ -468,7 +468,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
             FlatNode::Return(rv) => {
                 let mut res = vec![];
                 if let Some(rv) = rv {
-                    res.append(&mut self.process_rvalue(rv));
+                    res.extend(self.process_rvalue(rv));
                 }
                 res.push(Ret);
                 res
@@ -488,7 +488,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
         while let Some((node, sc)) = prog_slice.get(i) {
             self.local_scope = Some(sc);
             if is_regular_node(&node.node) {
-                res.append(&mut self.process_regular_node(curr_fn, &node.node));
+                res.extend(self.process_regular_node(curr_fn, &node.node));
             } else {
                 match &node.node {
                     FlatNode::Compound => {
@@ -500,7 +500,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                     }
 
                     FlatNode::If(rv) => {
-                        res.append(&mut self.process_rvalue(rv));
+                        res.extend(self.process_rvalue(rv));
                         let condition_is_false_label = self.label_counter.next().unwrap();
                         res.push(TestAndJumpIfZero(condition_is_false_label));
                         self.stmts_requiring_end_marker.push(
@@ -518,7 +518,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                             check_cond_label,
                             after_last_stmt: cond_is_false_label,
                         };
-                        res.append(&mut self.process_rvalue(rv));
+                        res.extend(self.process_rvalue(rv));
                         res.push(TestAndJumpIfZero(cond_is_false_label));
 
                         let idx = self.stmts_requiring_end_marker.len();
@@ -528,7 +528,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                     }
 
                     FlatNode::Switch(rv) => {
-                        res.append(&mut self.process_rvalue(rv));
+                        res.extend(self.process_rvalue(rv));
                         self.last_breakable_stmt_idxs_stack.push(
                             self.stmts_requiring_end_marker.len());
                         self.stmts_requiring_end_marker.push(StmtRequiringEndMarker::Switch {
@@ -586,7 +586,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                                 } else {
                                     case_table.push(Jump(after_last_stmt));
                                 }
-                                case_table.append(&mut res);
+                                case_table.extend(res);
                                 res = case_table;
                                 res.push(InternalLabel(after_last_stmt));
                             }
@@ -595,11 +595,9 @@ impl<'a> IntermediateCodeGenerator<'a> {
                     }
                     _ => unreachable!()
                 }
-                let (mut nodes, adv)
-                    = self.process_slice(
-                    curr_fn,
-                    &prog_slice[i + 1..]);
-                res.append(&mut nodes);
+                let (nodes, adv) = self.process_slice(curr_fn,
+                                                      &prog_slice[i + 1..]);
+                res.extend(nodes);
                 i += adv;
             }
             i += 1;
@@ -638,8 +636,8 @@ impl<'a> IntermediateCodeGenerator<'a> {
             } else {
                 unreachable!()
             };
-        let (mut rest_of_nodes, adv) = self.process_slice(curr_fn, &prog_slice[1..]);
-        res.append(&mut rest_of_nodes);
+        let (rest_of_nodes, adv) = self.process_slice(curr_fn, &prog_slice[1..]);
+        res.extend(rest_of_nodes);
         res.push(Ret);
         (res, adv + 1)
     }
@@ -705,10 +703,9 @@ impl<'a> IntermediateCodeGenerator<'a> {
         let flat_nodes: Vec<&FlatNodeAndPos> = program.local.iter().map(|x| &x.0).collect();
         for rng in get_fns_ranges(flat_nodes.into_iter()) {
             let rng_len = rng.len();
-            let (mut ir, adv)
-                = self.process_function(&program.local[rng]);
+            let (ir, adv) = self.process_function(&program.local[rng]);
             debug_assert_eq!(adv, rng_len);
-            res.append(&mut ir);
+            res.extend(ir);
             str_pool.extend(self.str_pool.take());
         }
         (res, str_pool)
