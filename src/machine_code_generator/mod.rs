@@ -146,33 +146,34 @@ impl MachineCodeGenerator {
         let main_reg = call_conv.main_register;
         let reg_for_calls = call_conv.reg_for_calls;
         let word_size = self.compiler_options.target_platform.arch.word_size();
-        res.append(&mut format!(r"
+        res.extend(format!(r"
                 mov {reg_for_calls}, rsp
                 and rsp, -{alignment}
                 i = 0
                 stack_var_count = {nargs} - {param_reg_count}
                 while i < stack_var_count
-                    lea {prev}, [{reg_for_calls} + i*{word_size}]
-                    lea {new}, [{new} + {word_size}]
-                    mov {prev}, [{prev}]
-                    mov [{new}], {prev}
+                    lea {supp}, [{reg_for_calls} + i*{word_size}]
+                    mov {supp}, [{supp}]
+                    mov [rsp + i*{word_size}], {supp}
                     i = i + 1
                 end while
 	            sub rsp, {shadow_space_size}",
-                                new = call_conv.supporting_registers[0],
-                                prev = call_conv.supporting_registers[1],
-                                nargs = nargs,
-                                word_size = word_size,
-                                reg_for_calls = reg_for_calls,
-                                alignment = call_conv.alignment,
-                                shadow_space_size = call_conv.shadow_space_size_in_bytes,
-                                param_reg_count = call_conv.registers_to_pass_args.len())
-            .split('\n')
-            .filter_map(|x| { if !x.is_empty() { Some(x.trim().to_owned()) } else { None } })
-            .collect());
+                           supp = call_conv.supporting_registers[0],
+                           nargs = nargs,
+                           word_size = word_size,
+                           reg_for_calls = reg_for_calls,
+                           alignment = call_conv.alignment,
+                           shadow_space_size = call_conv.shadow_space_size_in_bytes,
+                           param_reg_count = call_conv.registers_to_pass_args.len())
+            .split('\n').map(String::from));
         res.push(format!("rol {},{}", main_reg, self.get_lvalue_offset_in_bits()));
         res.push(format!("call {}", main_reg));
         res.push(format!("mov rsp, {}", reg_for_calls));
+        res.extend(format!(r"
+                if stack_var_count > 0
+                    add rsp, {word_size}*stack_var_count
+                end if", word_size = word_size)
+            .split('\n').map(String::from));
         res
     }
 
@@ -430,8 +431,9 @@ impl MachineCodeGenerator {
                     res.append(&mut self.align_and_call(*nargs + 1))
                 }
                 Nargs => {
-                    res.push(format!("mov {},{}+{}*(2+1)", main_reg,
-                                     reg_for_initial_rsp_minus_2_words, word_size))
+                    res.push(format!("lea {},[{}+{}*(2+1)]", main_reg,
+                                     reg_for_initial_rsp_minus_2_words, word_size));
+                    res.push(format!("mov {},[{0}]", main_reg))
                 }
                 Goto => {
                     res.push(format!("rol {},{}", main_reg, self.get_lvalue_offset_in_bits()));
@@ -551,14 +553,13 @@ impl MachineCodeGenerator {
                     db 'WriteFile',0
                 _GetCommandLineA dw 0
                     db 'GetCommandLineA',0
-                ".split('\n')
-                    .filter_map(|x| {
-                        let x = x.trim().to_owned();
-                        if !x.is_empty() { Some(x) } else { None }
-                    }))
+                ".split('\n').map(String::from))
             }
             _ => todo!()
         }
-        res
+        res.into_iter().filter_map(|x| {
+            let x = x.trim().to_owned();
+            if !x.is_empty() { Some(x) } else { None }
+        }).collect()
     }
 }

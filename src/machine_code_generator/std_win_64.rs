@@ -74,7 +74,7 @@ pub(crate) fn generate_std_lib_and_internals(already_defined: HashSet<&str>) -> 
                     }
                     "exit" => {
                         r"xor rcx, rcx
-                        call [ExitProcess]".to_owned()
+                        jmp [ExitProcess]".to_owned()
                     }
                     "char" => {
                         r"
@@ -110,10 +110,7 @@ pub(crate) fn generate_std_lib_and_internals(already_defined: HashSet<&str>) -> 
                         ret", proc_heap)
                     }
                     _ => "dq 0".to_owned(),
-                }.split('\n')
-                    .filter_map(|x| {
-                        if !x.is_empty() { Some(x.trim().to_owned()) } else { None }
-                    }))
+                }.split('\n').map(String::from))
             }
         }
     }
@@ -123,24 +120,20 @@ pub(crate) fn generate_std_lib_and_internals(already_defined: HashSet<&str>) -> 
 
     res.push(executable_section_or_segment(TARGET).to_owned());
     res.push(format!("{}:", START));
+    res.push(MachineCodeGenerator::align_stack(call_conv.alignment));
+    res.push("sub rsp, 4 * 8".to_owned());
     res.extend(&mut vec![
         "mov rcx, -11",
-        "sub rsp, 4 * 8",
         "call [GetStdHandle]",
-        "add rsp, 4 * 8",
         &format!("mov [{}], rax", internal_def("stdout")),
         "mov rcx, -10",
-        "sub rsp, 4 * 8",
         "call [GetStdHandle]",
-        "add rsp, 4 * 8",
         &format!("mov [{}], rax", internal_def("stdin")),
-        "sub rsp, 4 * 8",
         "call [GetProcessHeap]",
-        "add rsp, 4 * 8",
         &format!("mov [{}], rax", internal_def("proc_heap")),
     ].into_iter().map(String::from));
-    res.push(MachineCodeGenerator::align_stack(call_conv.alignment));
+    res.push("xor rcx, rcx".to_owned());
     res.push(format!("call {}", mangle_global_def("main")));
-    res.push(format!("call {}", mangle_global_def("exit")));
+    res.push(format!("jmp {}", mangle_global_def("exit")));
     res
 }

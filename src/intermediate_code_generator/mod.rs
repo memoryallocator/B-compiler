@@ -335,7 +335,11 @@ impl<'a> IntermediateCodeGenerator<'a> {
                     ast::LvalueNode { lvalue: ast::Lvalue::Name(fn_name), .. }
                 ) = &*fn_name.rvalue {
                     if fn_name == "nargs" {
-                        return vec![Nargs];
+                        if let Some(
+                            DefInfoAndPos { pos_if_user_defined: None, .. }
+                        ) = self.global_definitions.get("nargs") {
+                            return vec![Nargs];
+                        }
                     }
                 }
                 let mut res = vec![];
@@ -697,6 +701,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 _ => (),
             }
         }
+        let mut str_pool = HashMap::new();
         let flat_nodes: Vec<&FlatNodeAndPos> = program.local.iter().map(|x| &x.0).collect();
         for rng in get_fns_ranges(flat_nodes.into_iter()) {
             let rng_len = rng.len();
@@ -704,7 +709,8 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 = self.process_function(&program.local[rng]);
             debug_assert_eq!(adv, rng_len);
             res.append(&mut ir);
+            str_pool.extend(self.str_pool.take());
         }
-        (res, self.str_pool.take())
+        (res, str_pool)
     }
 }
