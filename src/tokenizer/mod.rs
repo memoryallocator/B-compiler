@@ -247,7 +247,7 @@ impl Tokenizer<'_> {
                                 && !self.compiler_options.continue_is_enabled {
                                 res.push(Token {
                                     token: WrappedToken::Name(name),
-                                    pos: token_pos
+                                    pos: token_pos,
                                 })
                             } else {
                                 res.push(Token {
@@ -266,7 +266,7 @@ impl Tokenizer<'_> {
                     }
                 }
                 match curr_char {
-                    ' ' => (),
+                    ' ' | '\t' | '\r' => (),
                     ',' => res.push(Token {
                         token: WrappedToken::Comma,
                         pos: token_pos,
@@ -286,12 +286,7 @@ impl Tokenizer<'_> {
                             .collect();
                         let number_len = number_as_str.len();
 
-                        let radix =
-                            if curr_char == '0' {
-                                8
-                            } else {
-                                10
-                            };
+                        let radix = if curr_char == '0' { 8 } else { 10 };
                         let val = u64::from_str_radix(&number_as_str, radix)
                             .unwrap_or_else(|_| {
                                 issues.push(Issue::LiteralTooLong(token_pos));
@@ -311,12 +306,10 @@ impl Tokenizer<'_> {
                     }),
                     '[' | ']' | '(' | ')' | '{' | '}' =>
                         res.push(Token {
-                            token: WrappedToken::Bracket(
-                                Bracket::from_char_unchecked(curr_char)),
+                            token: WrappedToken::Bracket(Bracket::from_char_unchecked(curr_char)),
                             pos: token_pos,
                         }),
-                    '\r' => (), // for Windows
-                    _ =>
+                    _ => {
                         if let Some(
                             (op, tokens_read)
                         ) = parse_operator(source_code[i..].chars().into_iter()) {
@@ -331,6 +324,7 @@ impl Tokenizer<'_> {
                             return Err(format!("{}: unknown character encountered: {}",
                                                token_pos, curr_char as char));
                         }
+                    }
                 }
             }
 

@@ -225,7 +225,7 @@ impl Display for Issue {
                 format!("unexpected keyword at {}", pos)
             }
 
-            CaseEncounteredTwice{ curr, prev } => {
+            CaseEncounteredTwice { curr, prev } => {
                 format!("case encountered twice: first at {}, then at {}", prev, curr)
             }
 
@@ -389,7 +389,7 @@ impl Default for CompilerOptions {
             target_platform: TargetPlatform::native(),
             stack_size: 4096,
             heap_size: 65536,
-            continue_is_enabled: false
+            continue_is_enabled: false,
         }
     }
 }
@@ -477,7 +477,7 @@ pub(crate) fn get_standard_library_names() -> HashMap<&'static str, StdNameInfo>
             ("system", 1),
             ("close", 1),
             ("flush", 0),
-            ("reread", 0)
+            ("reread", 0),
         ]);
 
     std_lib_fns_with_exact_num_of_params.push(("ioerrors", 1));
@@ -494,7 +494,7 @@ pub(crate) fn get_standard_library_names() -> HashMap<&'static str, StdNameInfo>
             ("getvec", 1),
             ("rlsevec", 2),
             ("nargs", 0),
-            ("exit", 0)
+            ("exit", 0),
         ]);
 
     let std_lib_fns_with_exact_num_of_params = std_lib_fns_with_exact_num_of_params

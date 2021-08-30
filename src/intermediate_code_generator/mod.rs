@@ -320,9 +320,12 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 let out = self.label_counter.next().unwrap();
                 let on_false_label = self.label_counter.next().unwrap();
                 let mut res = self.process_rvalue(&condition.rvalue);
+
                 res.push(TestAndJumpIfZero(on_false_label));
                 res.extend(self.process_rvalue(&on_true.rvalue));
                 res.push(Jump(out));
+
+                res.push(InternalLabel(on_false_label));
                 res.extend(self.process_rvalue(&on_false.rvalue));
                 res.push(InternalLabel(out));
                 res
@@ -605,15 +608,17 @@ impl<'a> IntermediateCodeGenerator<'a> {
         (res, i)
     }
 
-    fn reset(&mut self) {
+    fn reset_everything_except_str_pool(&mut self) {
+        let str_pool = self.str_pool.take();
         *self = Self::from(Self::new(self.compiler_options, self.global_definitions));
+        self.str_pool = Cell::new(str_pool);
     }
 
     fn process_function(
         &mut self,
         prog_slice: &'a [(FlatNodeAndPos, LocalScope)],
     ) -> (Vec<IntermRepr>, usize) {
-        self.reset();
+        self.reset_everything_except_str_pool();
         let mut res = vec![];
         use IntermRepr::*;
         if let FlatNode::Def(
@@ -699,15 +704,13 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 _ => (),
             }
         }
-        let mut str_pool = HashMap::new();
         let flat_nodes: Vec<&FlatNodeAndPos> = program.local.iter().map(|x| &x.0).collect();
         for rng in get_fns_ranges(flat_nodes.into_iter()) {
             let rng_len = rng.len();
             let (ir, adv) = self.process_function(&program.local[rng]);
             debug_assert_eq!(adv, rng_len);
             res.extend(ir);
-            str_pool.extend(self.str_pool.take());
         }
-        (res, str_pool)
+        (res, self.str_pool.take())
     }
 }

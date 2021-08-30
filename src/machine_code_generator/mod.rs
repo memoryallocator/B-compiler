@@ -152,8 +152,7 @@ impl MachineCodeGenerator {
                 i = 0
                 stack_var_count = {nargs} - {param_reg_count}
                 while i < stack_var_count
-                    lea {supp}, [{reg_for_calls} + i*{word_size}]
-                    mov {supp}, [{supp}]
+                    mov {supp}, [{reg_for_calls} + i*{word_size}]
                     mov [rsp + i*{word_size}], {supp}
                     i = i + 1
                 end while
@@ -191,7 +190,7 @@ impl MachineCodeGenerator {
         let mut res = vec![];
         res.push(format!("rol {},{}", addr, self.get_lvalue_offset_in_bits()));
         res.push(format!("mov [{addr}],{val}", addr = addr, val = val));
-        res.push(format!("mov {},[{0}]", addr));
+        res.push(format!("mov {addr},{val}", addr = addr, val = val));
         res
     }
 
@@ -233,8 +232,16 @@ impl MachineCodeGenerator {
                 res.push(format!("xchg {},{}", supp_reg, main_reg));
                 res.push(format!("idiv {}", supp_reg));
                 match bin_op {
-                    BinaryOp::Div => (),
-                    BinaryOp::Mod => res.push(format!("mov {},rdx", main_reg)),
+                    BinaryOp::Div => {
+                        if main_reg != "rax" {
+                            res.push(format!("mov {},rax", main_reg))
+                        }
+                    }
+                    BinaryOp::Mod => {
+                        if main_reg != "rdx" {
+                            res.push(format!("mov {},rdx", main_reg))
+                        }
+                    }
                     _ => unreachable!()
                 }
                 res.push("pop rdx".to_owned());
@@ -353,13 +360,13 @@ impl MachineCodeGenerator {
                 WriteLvalue => {
                     let supp_reg = supp_regs[0];
                     res.push(format!("pop {}", supp_reg));
-                    res.extend( self.write_lvalue(supp_reg, main_reg));
+                    res.extend(self.write_lvalue(supp_reg, main_reg));
                 }
                 LoadConstant(constant) => {
                     res.push(format!("mov {},{}", main_reg, constant))
                 }
                 Deref => {
-                    res.extend( self.deref_to_reg(main_reg, main_reg));
+                    res.extend(self.deref_to_reg(main_reg, main_reg));
                 }
                 DeclLabel(lbl) => {
                     res.push(format!("align {}", word_size));
@@ -387,28 +394,23 @@ impl MachineCodeGenerator {
                 }
 
                 LvUnary(un) => {
-                    match un.inc_dec_type {
-                        IncDecType::Prefix => {
-                            let supp_reg = supp_regs[0];
-                            res.extend( self.deref_to_reg(supp_reg, main_reg));
-                            res.push(
-                                match un.inc_or_dec {
-                                    IncOrDec::Increment => "inc",
-                                    IncOrDec::Decrement => "dec",
-                                }.to_owned() + " " + supp_reg);
-                            res.extend( self.write_lvalue(main_reg, supp_reg));
-                        }
-                        IncDecType::Postfix => {
-                            let supp_reg = supp_regs[0];
-                            res.extend( self.deref_to_reg(supp_reg, main_reg));
-                            res.push(
-                                match un.inc_or_dec {
-                                    IncOrDec::Increment => "inc",
-                                    IncOrDec::Decrement => "dec",
-                                }.to_owned() + " " + supp_reg);
-                            res.extend( self.write_lvalue(supp_reg, supp_reg));
-                        }
+                    res.push(format!("rol {},{}", main_reg, self.get_lvalue_offset_in_bits()));
+                    let inc_or_dec = match un.inc_or_dec {
+                        IncOrDec::Increment => "inc",
+                        IncOrDec::Decrement => "dec"
+                    };
+                    let (supp_reg, prev_val_reg) = (supp_regs[0], supp_regs[1]);
+
+                    res.push(format!("mov {},[{}]", supp_reg, main_reg));
+                    if un.inc_dec_type == IncDecType::Postfix {
+                        res.push(format!("mov {},{}", prev_val_reg, supp_reg));
                     }
+                    res.push(format!("{} {}", inc_or_dec, supp_reg));
+                    res.push(format!("mov [{}],{}", main_reg, supp_reg));
+                    res.push(format!("mov {},{}", main_reg, match un.inc_dec_type {
+                        IncDecType::Postfix => prev_val_reg,
+                        IncDecType::Prefix => supp_reg
+                    }));
                 }
                 RvUnary(un) => {
                     match un {
@@ -428,12 +430,11 @@ impl MachineCodeGenerator {
                     }
                 }
                 Call { nargs } => {
-                    res.extend( self.align_and_call(*nargs + 1))
+                    res.extend(self.align_and_call(*nargs + 1))
                 }
                 Nargs => {
-                    res.push(format!("lea {},[{}+{}*(2+1)]", main_reg,
+                    res.push(format!("mov {},[{}+{}*(2+1)]", main_reg,
                                      reg_for_initial_rsp_minus_2_words, word_size));
-                    res.push(format!("mov {},[{0}]", main_reg))
                 }
                 Goto => {
                     res.push(format!("rol {},{}", main_reg, self.get_lvalue_offset_in_bits()));
@@ -479,18 +480,27 @@ impl MachineCodeGenerator {
                 }
                 Ival(iv) => {
                     match iv {
-                        intermediate_code_generator::Ival::Name(_) => unreachable!(),
-                        intermediate_code_generator::Ival::Number(x) => res.push(
-                            format!("{} {}", declare_word_directive(word_size), x)),
+                        intermediate_code_generator::Ival::Number(x) => {
+                            res.push(format!("{} {}", declare_word_directive(word_size), x))
+                        }
                         intermediate_code_generator::Ival::ReserveWords(n) => {
-                            for _ in 0..*n {
-                                res.push(format!("{} ?", declare_word_directive(word_size)))
+                            res.push(format!("{} {} dup ?", declare_word_directive(word_size), n))
+                        }
+                        intermediate_code_generator::Ival::Name(lbl) => {
+                            match lbl {
+                                Label::Local(_) => unreachable!(),
+                                Label::Global(name) => {
+                                    res.push(format!("dq {}", mangle_global_def(name)))
+                                }
+                                Label::PooledStr(s) => {
+                                    res.push(format!("dq {}", pooled_str_label(*s)))
+                                }
                             }
                         }
                     }
                 }
                 BinOp(bin_op) => {
-                    res.extend( self.bin_op_to_machine_code(*bin_op))
+                    res.extend(self.bin_op_to_machine_code(*bin_op))
                 }
             }
         }
@@ -515,7 +525,7 @@ impl MachineCodeGenerator {
                 res.push(format!("{}:", pooled_str_end(*n)))
             }
         }
-        res.extend( self.generate_std_lib_and_internals(user_defined));
+        res.extend(self.generate_std_lib_and_internals(user_defined));
         match self.compiler_options.target_platform {
             WIN_64 => {
                 res.extend(r"

@@ -532,8 +532,7 @@ impl Parse for SwitchNode {
                     return Err(vec![UnexpectedToken(input[left_br_idx].pos)]);
                 }
 
-                let rvalue = RvalueNode::parse_exact(
-                    &input[left_br_idx + 1..right_br_idx])?;
+                let rvalue = RvalueNode::parse_exact(&input[left_br_idx + 1..right_br_idx])?;
 
                 let (body, adv) = StatementNode::parse(&input[right_br_idx + 1..])?;
                 let toks_consumed = right_br_idx + 1 + adv;
@@ -676,11 +675,11 @@ fn get_right_bracket_index(tokens: &[Token], left_br_idx: usize) -> usize {
                 Bracket { left_or_right: LeftOrRight::Left, pair_pos, .. }
             ), ..
         }) = tokens.get(left_br_idx) {
-        let right_bracket_pos = pair_pos.as_ref().unwrap();
+        let right_bracket_pos = pair_pos.unwrap();
 
         tokens
             .into_iter()
-            .position(|t| t.pos == *right_bracket_pos)
+            .position(|t| t.pos == right_bracket_pos)
             .unwrap()
     } else {
         unreachable!()
