@@ -134,8 +134,8 @@ impl Display for BinaryOperation {
             BinaryOperation::Mod => "%".to_owned(),
             BinaryOperation::Or => "|".to_owned(),
             BinaryOperation::Xor => "^".to_owned(),
-            BinaryOperation::Shift(l_or_r) => {
-                match l_or_r {
+            BinaryOperation::Shift(direction) => {
+                match direction {
                     LeftOrRight::Left => "<<",
                     LeftOrRight::Right => ">>",
                 }.to_owned()

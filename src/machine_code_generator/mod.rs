@@ -178,11 +178,8 @@ impl MachineCodeGenerator {
 
     fn deref_to_reg(&self, dst: &str, src: &str) -> Vec<String> {
         let mut res = vec![];
-        if dst != src {
-            res.push(format!("mov {dst},{src}", dst = dst, src = src));
-        }
-        res.push(format!("rol {},{}", dst, self.get_lvalue_offset_in_bits()));
-        res.push(format!("mov {},[{0}]", dst));
+        res.push(format!("rol {},{}", src, self.get_lvalue_offset_in_bits()));
+        res.push(format!("mov {},[{}]", dst, src));
         res
     }
 
@@ -210,9 +207,6 @@ impl MachineCodeGenerator {
         match bin_op {
             BinaryOp::Cmp(rel) => {
                 res.push(format!("cmp {},{}", supp_reg, main_reg));
-                res.push("pushf".to_owned());
-                res.push(format!("xor {},{0}", main_reg));
-                res.push("popf".to_owned());
                 let lower_byte = self.get_lower_byte_of_reg(main_reg);
                 let command =
                     "set".to_owned() + match rel {
@@ -224,56 +218,42 @@ impl MachineCodeGenerator {
                         BinaryRelation::Le => "le",
                     };
                 res.push(format!("{} {}", command, lower_byte));
+                res.push(format!("movzx {},{}", main_reg, lower_byte))
             }
 
             BinaryOp::Div | BinaryOp::Mod => {
-                res.push("push rdx".to_owned());
-                res.push("xor rdx,rdx".to_owned());
-                res.push(format!("xchg {},{}", supp_reg, main_reg));
+                res.push(format!("xchg rax,{}", supp_reg));
+                res.push("cqo".to_owned());
                 res.push(format!("idiv {}", supp_reg));
                 match bin_op {
-                    BinaryOp::Div => {
-                        if main_reg != "rax" {
-                            res.push(format!("mov {},rax", main_reg))
-                        }
-                    }
+                    BinaryOp::Div => (),
                     BinaryOp::Mod => {
-                        if main_reg != "rdx" {
-                            res.push(format!("mov {},rdx", main_reg))
-                        }
+                        res.push(format!("mov {},rdx", main_reg))
                     }
                     _ => unreachable!()
                 }
-                res.push("pop rdx".to_owned());
             }
 
-            BinaryOp::Shift(l_or_r) => {
-                res.push("push rcx".to_owned());
+            BinaryOp::Shift(direction) => {
                 res.push(format!("mov rcx,{}", main_reg));
-                match l_or_r {
+                match direction {
                     LeftOrRight::Left => res.push(format!("shl {},cl", supp_reg)),
                     LeftOrRight::Right => res.push(format!("shr {},cl", supp_reg)),
                 }
                 res.push(format!("mov {},{}", main_reg, supp_reg));
-                res.push("pop rcx".to_owned());
             }
 
             BinaryOp::LogicalAnd => {
                 let snd_supp = call_conv.supporting_registers[1];
                 res.push(format!("test {},{0}", main_reg));
-                res.push("pushf".to_owned());
-                res.push(format!("xor {},{0}", main_reg));
-                res.push("popf".to_owned());
 
                 let main_lower_byte = self.get_lower_byte_of_reg(main_reg);
                 res.push(format!("setnz {}", main_lower_byte));
-                res.push(format!("mov {},{}", snd_supp, main_reg));
+                res.push(format!("movzx {},{}", snd_supp, main_lower_byte));
 
                 res.push(format!("test {},{0}", supp_reg));
-                res.push("pushf".to_owned());
-                res.push(format!("xor {},{0}", supp_reg));
-                res.push("popf".to_owned());
                 res.push(format!("setnz {}", main_lower_byte));
+                res.push(format!("movzx {},{}", main_reg, main_lower_byte));
 
                 res.push(format!("push {}", snd_supp));
                 res.extend(self.bin_op_to_machine_code(BinaryOp::BitwiseAnd));
@@ -326,9 +306,9 @@ impl MachineCodeGenerator {
                     match lv {
                         Lvalue::NthArg(n) => {
                             res.push(format!(
-                                "lea {main_reg},[{reg_for_initial_rsp_minus_2_words}+{word_size}*(2+1+1+{n})]",
+                                "lea {main_reg},[{initial_rsp}+{word_size}*(2+1+1+{n})]",
                                 main_reg = main_reg,
-                                reg_for_initial_rsp_minus_2_words = reg_for_initial_rsp_minus_2_words,
+                                initial_rsp = reg_for_initial_rsp_minus_2_words,
                                 n = n, word_size = word_size))
                         }
                         Lvalue::LocalVar(st) => {
@@ -422,10 +402,9 @@ impl MachineCodeGenerator {
                         }
                         RvalueUnary::LogicalNot => {
                             res.push(format!("test {},{0}", main_reg));
-                            res.push("pushf".to_owned());
-                            res.push(format!("xor {},{0}", main_reg));
-                            res.push("popf".to_owned());
-                            res.push(format!("setz {}", self.get_lower_byte_of_reg(main_reg)));
+                            let lower_byte = self.get_lower_byte_of_reg(main_reg);
+                            res.push(format!("setz {}", lower_byte));
+                            res.push(format!("movzx {},{}", main_reg, lower_byte));
                         }
                     }
                 }
