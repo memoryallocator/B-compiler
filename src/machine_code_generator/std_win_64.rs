@@ -26,12 +26,11 @@ pub(crate) fn generate_std_lib_and_internals(already_defined: HashSet<&str>) -> 
                 "putchar" => format!(r"
                     push r12
                     push r13
-                    lea r12, [rsp + 2*8 + 2*8]
+                    lea r12, [rsp + (2 + 2) * 8]
                     mov [r12], rdx
                     xor r13, r13
-                    sub rsp, 6 * 8
+                    lea rsp, [rsp - 5 * 8]
                 .loop:
-                    xor rax, rax
                     mov al, [r12 + r13]
                     test al, al
                     je .iter
@@ -41,7 +40,7 @@ pub(crate) fn generate_std_lib_and_internals(already_defined: HashSet<&str>) -> 
                     mov rcx, [{stdout}]
                     lea rdx, [r12 + r13]
                     mov r8, 1
-                    lea r9, [rsp + 6*8 + 2*8 + 1*8]
+                    lea r9, [rsp + (5 + 2 + 1) * 8]
                     mov QWORD [rsp + 4*8], 0  ; 5th parameter
                     call [WriteFile]
                 .iter:
@@ -50,7 +49,7 @@ pub(crate) fn generate_std_lib_and_internals(already_defined: HashSet<&str>) -> 
                     inc r13
                     jmp .loop
                 .out:
-                    add rsp, 6 * 8
+                    lea rsp, [rsp + 5 * 8]
                     pop r13
                     pop r12
                     ret", stdout = stdout),
@@ -59,14 +58,12 @@ pub(crate) fn generate_std_lib_and_internals(already_defined: HashSet<&str>) -> 
                     lea rdx, [rsp + 8]
                     mov rcx, [{stdin}]
                     mov r8, 1
-                    mov r9, 0
-                    push 0  ; filler
+                    xor r9, r9
                     push 0  ; 5th parameter
-                    sub rsp, 4 * 8
+                    lea rsp, [rsp - 4 * 8]
                     call [ReadFile]
-                    add rsp, 6 * 8
-                    xor rax, rax
-                    mov al, [rsp + 8]
+                    lea rsp, [rsp + 5 * 8]
+                    movzx rax, BYTE [rsp + 8]
                     ret", stdin = stdin),
 
                 "exit" => r"xor rcx, rcx
@@ -74,9 +71,7 @@ pub(crate) fn generate_std_lib_and_internals(already_defined: HashSet<&str>) -> 
 
                 "char" => r"
                     rol rdx, 3
-                    lea rdx, [rdx + r8]
-                    xor rax, rax
-                    mov al, [rdx]
+                    movzx rax, BYTE [rdx + r8]
                     ret".to_owned(),
 
                 "getvec" => format!(r"
@@ -85,9 +80,9 @@ pub(crate) fn generate_std_lib_and_internals(already_defined: HashSet<&str>) -> 
                     shl r8, 3
                     mov rcx, [{}]
                     mov rdx, 0x00000008  ; HEAP_ZERO_MEMORY
-                    sub rsp, 5 * 8
+                    lea rsp, [rsp - 5 * 8]
                     call [HeapAlloc]
-                    add rsp, 5 * 8
+                    lea rsp, [rsp + 5 * 8]
                     ror rax, 3
                     ret", proc_heap),
 
@@ -95,27 +90,24 @@ pub(crate) fn generate_std_lib_and_internals(already_defined: HashSet<&str>) -> 
                     rol rdx, 3
                     mov r8, rdx
                     mov rcx, [{}]
-                    mov rdx, 0
-                    sub rsp, 4 * 8
+                    xor rdx, rdx
+                    lea rsp, [rsp - 5 * 8]
                     call [HeapFree]
-                    add rsp, 4 * 8
+                    lea rsp, [rsp + 5 * 8]
                     ret", proc_heap),
 
                 "printf" => format!(r"
                     push r12
                     push r13
                     push r14
-                    push r15
-                    lea r14, [rsp + 4*8 + 3*8]
+                    lea r14, [rsp + (3 + 3) * 8]
                     mov [r14], r8
                     mov [r14 + 1*8], r9
-                    sub rsp, 4 * 8
+                    lea rsp, [rsp - 4 * 8]
                     rol rdx, 3
                     mov r12, rdx
-                    xor r13, r13
                 .loop:
-                    xor rdx, rdx
-                    mov dl, [r12]
+                    movzx rdx, BYTE [r12]
                     cmp dl, 4
                     je .out
                     inc r12
@@ -144,64 +136,52 @@ pub(crate) fn generate_std_lib_and_internals(already_defined: HashSet<&str>) -> 
                     call {internal_putchar}
                     jmp .advance_arg_and_repeat
 
-                .oct:
-                    mov rdx, [r14]
-                    mov r8, 1*8
-                    call {print_unsigned}
-                    jmp .advance_arg_and_repeat
-
-                .dec:
-                    mov rax, -9'223'372'036'854'775'808
-                    mov r15, [r14]
-                    cmp r15, rax
-                    je .min_word
-                    test r15, r15
-                    js .negative
-
-                    .dec_unsigned:
-                    mov rdx, r15
-                    mov r8, 10
-                    call {print_unsigned}
-                    jmp .advance_arg_and_repeat
-
-                    .negative:
-                        mov rdx, '-'
-                        call {internal_putchar}
-                        neg r15
-                        jmp .dec_unsigned
-
-                    .min_word:
-                        mov rdx, '-'
-                        call {internal_putchar}
-                        mov rdx, '9'
-                        call {internal_putchar}
-                        mov r15, 223'372'036'854'775'808
-                        jmp .dec_unsigned
-
                 .str:
-                    mov r15, [r14]
-                    rol r15, 3
-                    .iter_str:
-                        xor rdx, rdx
-                        mov dl, [r15]
-                        cmp dl, 4
-                        je .advance_arg_and_repeat
-                        call {internal_putchar}
-                    .next_iter:
-                        inc r15
-                        jmp .iter_str
+                    mov rdx, [r14]
+                    call {internal_putstr}
+                    jmp .advance_arg_and_repeat
 
                 .percent:
                     mov rdx, '%'
                     call {internal_putchar}
+                    jmp .advance_arg_and_repeat
+
+                .oct:
+                    mov rdx, [r14]
+                    mov r8, 8
+                    call {print_unsigned}
+                    jmp .advance_arg_and_repeat
+
+                .min_word:
+                    mov rdx, '9'
+                    call {internal_putchar}
+                    mov rdx, 223'372'036'854'775'808
+                    jmp .dec_unsigned_rdx
+
+                .dec:
+                    mov r13, [r14]
+                    test r13, r13
+                    jns .dec_unsigned
+
+                    .negative:
+                        mov rdx, '-'
+                        call {internal_putchar}
+                        neg r13
+                        test r13, r13
+                        jz .min_word
+
+                    .dec_unsigned:
+                        mov rdx, r13
+                    .dec_unsigned_rdx:
+                        mov r8, 10
+                        call {print_unsigned}
 
                 .advance_arg_and_repeat:
-                    add r14, 8
+                    lea r14, [r14 + 8]
                     jmp .loop
 
                 .out:
-                    add rsp, 4 * 8
-                    pop r15
+                    lea rsp, [rsp + 4 * 8]
                     pop r14
                     pop r13
                     pop r12
@@ -210,14 +190,15 @@ pub(crate) fn generate_std_lib_and_internals(already_defined: HashSet<&str>) -> 
                 {print_unsigned}:
                     push r12
                     xor r12, r12
-                    sub rsp, 4*8
+                    lea rsp, [rsp - 4 * 8]
                     mov rax, rdx
                     mov BYTE [rsp + 4*8 + 32 + 7], 4
+
                     .fill_digit_array:
                         inc r12
                         xor rdx, rdx
                         div r8
-                        add rdx, '0'
+                        add dl, '0'
                         lea rcx, [rsp + 4*8 + 32 + 7]
                         sub rcx, r12
                         mov [rcx], dl
@@ -227,13 +208,32 @@ pub(crate) fn generate_std_lib_and_internals(already_defined: HashSet<&str>) -> 
                     .print:
                         mov rdx, rcx
                         ror rdx, 3
-                        call {internal_printf}
+                        call {internal_putstr}
 
-                    add rsp, 4*8
+                    lea rsp, [rsp + 4 * 8]
                     pop r12
                     ret", internal_putchar = internal_def("putchar"),
                                     print_unsigned = internal_def("print_unsigned"),
-                                    internal_printf = internal_def("printf")),
+                                    internal_putstr = internal_def("putstr")),
+
+                "putstr" => format!(r"
+                    push r15
+                    lea rsp, [rsp - 4 * 8]
+                    mov r15, rdx
+                    rol r15, 3
+
+                    .iter_str:
+                        movzx rdx, BYTE [r15]
+                        cmp dl, 4
+                        je .out
+                        call {internal_putchar}
+                    .next_iter:
+                        inc r15
+                        jmp .iter_str
+                    .out:
+                        lea rsp, [rsp + 4 * 8]
+                        pop r15
+                        ret", internal_putchar = internal_def("putchar")),
 
                 _ => "dq 0".to_owned(),
             });

@@ -177,9 +177,8 @@ impl Tokenizer<'_> {
             if curr_char == '\n' {
                 curr_line_started_at = i + 1;
                 line_no += 1;
-            } else if let Some(
-                (ref curr_reading, pos)
-            ) = currently_reading {
+            }
+            if let Some((ref curr_reading, pos)) = currently_reading {
                 let closing_literal = curr_reading.get_closing_literal();
 
                 if source_code[i..].starts_with(closing_literal) {
@@ -266,7 +265,7 @@ impl Tokenizer<'_> {
                     }
                 }
                 match curr_char {
-                    ' ' | '\t' | '\r' => (),
+                    ' ' | '\t' | '\r' | '\n' => (),
                     ',' => res.push(Token {
                         token: WrappedToken::Comma,
                         pos: token_pos,

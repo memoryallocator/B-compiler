@@ -434,7 +434,10 @@ impl MachineCodeGenerator {
                     res.push(format!("push {}", reg_for_calls));
                     res.push(format!("push {}", reg_for_initial_rsp_minus_2_words));
                     res.push(format!("mov {},rsp", reg_for_initial_rsp_minus_2_words));
-                    res.push(format!("sub rsp,{}*{}", info.stack_size, word_size));
+
+                    if info.stack_size != 0 {
+                        res.push(format!("sub rsp,{}*{}", info.stack_size, word_size));
+                    }
                     user_defined.insert(name.as_str());
 
                     let num_of_args_to_shadow_space =

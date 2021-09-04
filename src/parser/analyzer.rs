@@ -140,7 +140,8 @@ impl<'a> Analyzer<'a> {
             }
             FlatDeclarationNameInfo::Extern => {
                 if global_def.is_none() {
-                    issues.push(ExternSymbolNotFound { name: name.clone(), extern_pos: pos })
+                    issues.push(ExternSymbolNotFound { name: name.clone(), extern_pos: pos });
+                    return;
                 }
                 explicit_decl_type = ExplicitDeclType::Extern;
                 decl_info = ProcessedDeclInfo::ExplicitExtern(global_def.unwrap().clone());

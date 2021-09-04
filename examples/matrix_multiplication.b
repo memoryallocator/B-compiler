@@ -34,26 +34,8 @@ matrix_multiply(A, a_rows, a_cols, B, b_rows, b_cols) {
     return ( res );
 }
 
-print_num(c) {
-    if (c == 0) {
-        putchar('0');
-        return;
-    }
-    auto d[19];
-    auto i; i = 0;
-    while (1) {
-        d[i] = c % 10;
-        ++i;
-        c =/ 10;
-        if (c == 0) {
-            break;
-        }
-    }
-    --i;
-    while (i >= 0) {
-        putchar('0' + d[i]);
-        --i;
-    }
+print_num(x) {
+    printf("%d", x);
 }
 
 print_matrix(M, rows, cols) {
@@ -100,5 +82,6 @@ main() {
 
     print_matrix(C, a_rows, b_cols);
     free_matrix(C, a_rows);
+    putstr("Press Enter to exit");
     getchar();
 }

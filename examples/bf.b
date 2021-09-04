@@ -1,4 +1,3 @@
-DEBUG 0;
 TAPE_SIZE 30000;
 CELL_SIZE 256;
 
@@ -66,11 +65,6 @@ is_valid_command(c) {
     }
 }
 
-panic(msg) {
-    putchar(msg);
-    exit();
-}
-
 print_tape(tape, n) {
     if (n <= 0) {
         return;
@@ -84,39 +78,13 @@ print_tape(tape, n) {
     }
 }
 
-print_num(c) {
-    if (c == 0) {
-        putchar('0');
-        return;
-    }
-    auto d[19];
-    auto i; i = 0;
-    while (1) {
-        d[i] = c % 10;
-        ++i;
-        c =/ 10;
-        if (c == 0) {
-            break;
-        }
-    }
-    --i;
-    while (i >= 0) {
-        putchar('0' + d[i]);
-        --i;
-    }
+print_num(x) {
+    printf("%d", x);
 }
 
 main() {
-    extrn DEBUG;
     extrn TAPE_SIZE, CELL_SIZE;
     auto tape; tape = getvec(TAPE_SIZE - 1);
-    if (DEBUG) {
-        putchar('&tape = ');
-        print_num(&tape << 3);
-        putchar('*ntape = ');
-        print_num(tape << 3);
-        putchar('*n');
-    }
     auto i; i = 0;
     auto skip; skip = 0;
     auto nesting; nesting = 0;
@@ -124,27 +92,8 @@ main() {
     auto commands; commands = 0;
     auto commands_len; commands_len = 0;
     auto command_idx; command_idx = 0;
-    auto c;
-    auto instr; instr = -1;
     while (1) {
-        if (DEBUG) {
-            ++instr;
-            putchar('ci = ');
-            print_num(command_idx);
-            putchar('*ncl = ');
-            print_num(commands_len);
-            putchar('*ni = ');
-            print_num(i);
-            putchar('*ninstr =');
-            putchar(' ');
-            print_num(instr);
-            putchar('*n');
-            print_tape(tape, 7);
-            putchar('*n');
-        }
-        if (tape == 0) {
-            panic('wh');
-        }
+        auto c;
         if (command_idx < commands_len) {
             c = commands[command_idx];
         } else {
@@ -156,11 +105,6 @@ main() {
                 commands = append(commands, commands_len, c);
                 ++commands_len;
             }
-        }
-        if (DEBUG) {
-            putchar('c = ');
-            putchar(c);
-            putchar('*n');
         }
         if (skip) {
             switch (c) {
