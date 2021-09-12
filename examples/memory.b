@@ -6,7 +6,7 @@ main() {
     v = getvec(SIZE);
     printf("allocated*n");
 
-    printf("Please type not less than %d symbols.*n", SIZE+1);
+    printf("Please type exactly %d symbols.*n", SIZE+1);
     auto i; i = 0;
     while (i <= SIZE) {
         v[i] = getchar();

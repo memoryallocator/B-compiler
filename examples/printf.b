@@ -9,6 +9,17 @@ main() {
     auto line; line = "line";
     printf("*n%s %s %s*n*n", end, of, line);
 
+    printf("%s %s %s %c%c%c%c%c%c%c%c%c%c", "a", "lot", "of", 'a', 'r', 'g', 'u', 'm', 'e', 'n', 't', 's', '*n');
+    printf("*n");
+
+    printf("percent sign (%%) %s*n*n", "test");
+
+    auto min_word; min_word = -9223372036854775808;
+    printf("min_word = %d*n", min_word);
+    printf("min_word + 1 = %d*n", min_word + 1);
+    printf("min_word - 1 = %d*n", min_word - 1);
+    printf("%s", "*n");
+
     auto a; a = 2;
     auto b; b = 2;
     auto c; c = 2;

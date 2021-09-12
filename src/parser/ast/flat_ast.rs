@@ -87,7 +87,7 @@ pub(crate) struct FlatNodeAndPos {
     pub(crate) pos: TokenPos,
 }
 
-type FlatAst = Vec<FlatNodeAndPos>;
+pub(crate) type FlatAst = Vec<FlatNodeAndPos>;
 
 impl FlattenNode for ProgramNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {

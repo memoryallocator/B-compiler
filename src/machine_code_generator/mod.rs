@@ -1,8 +1,9 @@
 mod std_win_64;
+mod std_linux_64;
 
 use std::*;
 use collections::{HashMap, HashSet};
-use ops::Div;
+use cmp::min;
 
 use crate::intermediate_code_generator;
 use intermediate_code_generator::*;
@@ -49,7 +50,9 @@ fn readonly_section_or_segment(target: TargetPlatform) -> &'static str {
         WIN_64 => {
             "section '.rodata' readable"
         }
-        _ => todo!()
+        LINUX_64 => {
+            "segment readable"
+        }
     }
 }
 
@@ -58,7 +61,9 @@ fn readable_writable_section_or_segment(target: TargetPlatform) -> &'static str 
         WIN_64 => {
             "section '.data' readable writeable"
         }
-        _ => todo!()
+        LINUX_64 => {
+            "segment readable writeable"
+        }
     }
 }
 
@@ -67,7 +72,9 @@ fn executable_section_or_segment(target: TargetPlatform) -> &'static str {
         WIN_64 => {
             "section '.text' executable"
         }
-        _ => todo!()
+        LINUX_64 => {
+            "segment executable"
+        }
     }
 }
 
@@ -100,13 +107,37 @@ impl MachineCodeGenerator {
     }
 
     fn generate_std_lib_and_internals(&self, already_defined: HashSet<&str>) -> Vec<String> {
-        match self.compiler_options.target_platform {
+        let target = self.compiler_options.target_platform;
+        let mut res = vec![];
+        for (name, info) in get_standard_library_names() {
+            if already_defined.contains(name) {
+                continue;
+            }
+            match info {
+                StdNameInfo::Variable { ival } => {
+                    res.push(readable_writable_section_or_segment(target).to_owned());
+                    res.push(format!("{}:", mangle_global_def(name)));
+                    res.push(format!("{} {}", declare_word_directive(8), ival))
+                }
+                StdNameInfo::Function(_) => {
+                    res.push(executable_section_or_segment(target).to_owned());
+                    res.push(format!("{}:", mangle_global_def(name)));
+                    res.push(format!("jmp {}", internal_def(name)));
+                }
+            }
+        }
+
+        res.extend(match target {
             WIN_64 => {
                 use std_win_64::generate_std_lib_and_internals;
-                generate_std_lib_and_internals(already_defined)
+                generate_std_lib_and_internals()
             }
-            _ => todo!()
-        }
+            LINUX_64 => {
+                use std_linux_64::generate_std_lib_and_internals;
+                generate_std_lib_and_internals()
+            }
+        });
+        res
     }
 
     fn pack_string_and_append_eot(&self, s: &str) -> Vec<u64> {
@@ -139,14 +170,14 @@ impl MachineCodeGenerator {
         let call_conv = self.compiler_options.target_platform.calling_convention();
         let mut res = vec![];
         let regs_for_args = &call_conv.registers_to_pass_args;
-        for i in 0..cmp::min(nargs as usize, regs_for_args.len()) {
+        for i in 0..min(nargs as usize, regs_for_args.len()) {
             res.push(format!("pop {}", regs_for_args[i as usize]));
         }
 
         let main_reg = call_conv.main_register;
         let reg_for_calls = call_conv.reg_for_calls;
         let word_size = self.compiler_options.target_platform.arch.word_size();
-        res.extend(format!(r"
+        res.push(format!(r"
                 mov {reg_for_calls}, rsp
                 and rsp, -{alignment}
                 i = 0
@@ -155,24 +186,22 @@ impl MachineCodeGenerator {
                     mov {supp}, [{reg_for_calls} + i*{word_size}]
                     mov [rsp + i*{word_size}], {supp}
                     i = i + 1
-                end while
-	            sub rsp, {shadow_space_size}",
-                           supp = call_conv.supporting_registers[0],
-                           nargs = nargs,
-                           word_size = word_size,
-                           reg_for_calls = reg_for_calls,
-                           alignment = call_conv.alignment,
-                           shadow_space_size = call_conv.shadow_space_size_in_bytes,
-                           param_reg_count = call_conv.registers_to_pass_args.len())
-            .split('\n').map(String::from));
+                end while", supp = call_conv.supporting_registers[0],
+                         nargs = nargs,
+                         word_size = word_size,
+                         reg_for_calls = reg_for_calls,
+                         alignment = call_conv.alignment,
+                         param_reg_count = regs_for_args.len()));
+        if call_conv.use_shadow_space {
+            res.push(format!("sub rsp, {}", regs_for_args.len() * word_size as usize))
+        }
         res.push(format!("rol {},{}", main_reg, self.get_lvalue_offset_in_bits()));
         res.push(format!("call {}", main_reg));
         res.push(format!("mov rsp, {}", reg_for_calls));
-        res.extend(format!(r"
+        res.push(format!(r"
                 if stack_var_count > 0
                     add rsp, {word_size}*stack_var_count
-                end if", word_size = word_size)
-            .split('\n').map(String::from));
+                end if", word_size = word_size));
         res
     }
 
@@ -283,41 +312,55 @@ impl MachineCodeGenerator {
         let main_reg = call_conv.main_register;
         let supp_regs = call_conv.supporting_registers;
         let reg_for_calls = call_conv.reg_for_calls;
-        let reg_for_initial_rsp_minus_2_words = call_conv.reg_for_initial_rsp;
+        let reg_for_initial_rsp = call_conv.reg_for_initial_rsp;
         let regs_for_args = &call_conv.registers_to_pass_args;
         let word_size = target.arch.word_size();
+        let use_shadow_space = call_conv.use_shadow_space;
+
+        let mut args_passed_to_curr_fn = None;
 
         let mut res =
             match target {
+                LINUX_64 => vec!["format ELF64 executable 3".to_owned()],
                 WIN_64 => vec!["format PE64 console".to_owned(),
                                format!("stack {},{0}", comp_opts.stack_size),
                                format!("heap {},{0}", comp_opts.heap_size)],
-                TargetPlatform {
-                    platform_name: PlatformName::Linux, arch: Arch::x86_64
-                } => todo!(),
             };
         res.push(format!("entry {}", START));
 
         let mut user_defined = HashSet::new();
 
         for ir in &self.intermediate_code {
+            let regs_for_args_len = regs_for_args.len() as u64;
             match ir {
                 LoadLvalue(lv) => {
                     match lv {
                         Lvalue::NthArg(n) => {
-                            res.push(format!(
-                                "lea {main_reg},[{initial_rsp}+{word_size}*(2+1+1+{n})]",
-                                main_reg = main_reg,
-                                initial_rsp = reg_for_initial_rsp_minus_2_words,
-                                n = n, word_size = word_size))
+                            if use_shadow_space || *n >= regs_for_args_len {
+                                res.push(format!(
+                                    "lea {main_reg},[{initial_rsp}+{word_size}*(2+1+{n})]",
+                                    main_reg = main_reg, initial_rsp = reg_for_initial_rsp,
+                                    n = if use_shadow_space { *n } else { n - regs_for_args_len },
+                                    word_size = word_size))
+                            } else {
+                                res.push(format!(
+                                    "lea {main_reg},[{initial_rsp}-(1+{n})*{word_size}]",
+                                    main_reg = main_reg,
+                                    initial_rsp = reg_for_initial_rsp,
+                                    n = n, word_size = word_size))
+                            }
                         }
                         Lvalue::LocalVar(st) => {
-                            res.push(format!("lea {},[{}-(1+{offset_in_words})*{}]", main_reg,
-                                             reg_for_initial_rsp_minus_2_words, word_size,
-                                             offset_in_words = match st {
-                                                 StackRange::Exact(n) => n,
-                                                 StackRange::Span(st) => st.end()
-                                             }));
+                            res.push(format!(
+                                "lea {main},[{base}-({offset_in_words})*{word_sz}]",
+                                main = main_reg, word_sz = word_size,
+                                base = reg_for_initial_rsp,
+                                offset_in_words = 1 + match st {
+                                    StackRange::Exact(n) => n,
+                                    StackRange::Span(st) => st.end()
+                                } + if use_shadow_space { 0 } else {
+                                    min(args_passed_to_curr_fn.unwrap(), regs_for_args_len) as u64
+                                }));
                         }
                         Lvalue::Label(lbl) => {
                             match lbl {
@@ -349,11 +392,9 @@ impl MachineCodeGenerator {
                     res.extend(self.deref_to_reg(main_reg, main_reg));
                 }
                 DeclLabel(lbl) => {
-                    res.push(format!("align {}", word_size));
                     res.push(format!("{}:", mangle_label(&lbl)))
                 }
                 InternalLabel(lbl_id) => {
-                    res.push(format!("align {}", word_size));
                     res.push(format!("{}:", internal_label(*lbl_id)))
                 }
                 Jump(lbl_id) => {
@@ -411,48 +452,44 @@ impl MachineCodeGenerator {
                 Call { nargs } => {
                     res.extend(self.align_and_call(*nargs + 1))
                 }
-                Nargs => {
-                    res.push(format!("mov {},[{}+{}*(2+1)]", main_reg,
-                                     reg_for_initial_rsp_minus_2_words, word_size));
-                }
                 Goto => {
                     res.push(format!("rol {},{}", main_reg, self.get_lvalue_offset_in_bits()));
                     res.push(format!("jmp {}", main_reg));
                 }
                 Ret => {
-                    res.push(format!("mov rsp,{}", reg_for_initial_rsp_minus_2_words));
-                    res.push(format!("pop {}", reg_for_initial_rsp_minus_2_words));
+                    res.push(format!("mov rsp,{}", reg_for_initial_rsp));
+                    res.push(format!("pop {}", reg_for_initial_rsp));
                     res.push(format!("pop {}", reg_for_calls));
                     res.push("ret".to_owned());
                 }
 
                 FnDef(name, info) => {
                     res.push(executable_section_or_segment(target).to_owned());
-                    res.push(format!("align {}", word_size));
                     res.push(format!("{}:", mangle_global_def(&name)));
 
                     res.push(format!("push {}", reg_for_calls));
-                    res.push(format!("push {}", reg_for_initial_rsp_minus_2_words));
-                    res.push(format!("mov {},rsp", reg_for_initial_rsp_minus_2_words));
+                    res.push(format!("push {}", reg_for_initial_rsp));
+                    res.push(format!("mov {},rsp", reg_for_initial_rsp));
 
-                    if info.stack_size != 0 {
-                        res.push(format!("sub rsp,{}*{}", info.stack_size, word_size));
-                    }
                     user_defined.insert(name.as_str());
 
-                    let num_of_args_to_shadow_space =
-                        *vec![regs_for_args.len() as u64,
-                              call_conv.shadow_space_size_in_bytes.div(word_size as u64),
-                              info.num_of_params + 1].iter().min().unwrap() as usize;
-                    for (i, reg) in regs_for_args[
-                        ..num_of_args_to_shadow_space].iter().enumerate() {
-                        let supp_reg = supp_regs[0];
+                    let args_to_curr_fn = info.num_of_params + 1;
+                    let num_of_args_to_save = min(regs_for_args.len() as u64, args_to_curr_fn);
+                    args_passed_to_curr_fn = Some(args_to_curr_fn);
+
+                    let words_needed =
+                        info.stack_size + if !use_shadow_space { num_of_args_to_save } else { 0 };
+                    if words_needed != 0 {
+                        res.push(format!("sub rsp,{}*{}", words_needed, word_size));
+                    }
+
+                    for (i, reg) in regs_for_args[..num_of_args_to_save as usize]
+                        .iter().enumerate() {
+                        res.push(format!("i = {}", i));
                         res.push(format!(
-                            "lea {supp_reg},[{reg_for_initial_rsp_minus_2_words}+{word_size}*({i}+1+2)]",
-                            supp_reg = supp_reg,
-                            reg_for_initial_rsp_minus_2_words = reg_for_initial_rsp_minus_2_words,
-                            i = i, word_size = word_size));
-                        res.push(format!("mov [{}],{}", supp_reg, reg));
+                            "mov [{base}+{word_size}*({offset})],{reg}",
+                            offset = if use_shadow_space { "2+1+i" } else { "-(1+i)" },
+                            reg = reg, word_size = word_size, base = reg_for_initial_rsp));
                     }
                 }
                 VarOrVecDef(name) => {
@@ -489,7 +526,6 @@ impl MachineCodeGenerator {
         if !self.pooled_strings.is_empty() {
             res.push(readonly_section_or_segment(target).to_owned());
             for (s, n) in &self.pooled_strings {
-                res.push(format!("align {}", word_size));
                 res.push(format!("{}:", pooled_str_label(*n)));
                 let s = (|| {
                     let mut res = String::new();
@@ -508,9 +544,8 @@ impl MachineCodeGenerator {
             }
         }
         res.extend(self.generate_std_lib_and_internals(user_defined));
-        match self.compiler_options.target_platform {
-            WIN_64 => {
-                res.extend(r"
+        if self.compiler_options.target_platform == WIN_64 {
+            res.push(r"
                 section '.idata' import data readable writeable
 
                 dd 0,0,0,RVA kernel_name,RVA kernel_table
@@ -544,14 +579,14 @@ impl MachineCodeGenerator {
                 _WriteFile dw 0
                     db 'WriteFile',0
                 _GetCommandLineA dw 0
-                    db 'GetCommandLineA',0
-                ".split('\n').map(String::from))
-            }
-            _ => todo!()
+                    db 'GetCommandLineA',0".to_owned())
         }
-        res.into_iter().filter_map(|x| {
-            let x = x.trim().to_owned();
-            if !x.is_empty() { Some(x) } else { None }
-        }).collect()
+        res.into_iter().fold(vec![], |mut acc, x| {
+            acc.extend(x.split('\n').filter_map(|x| {
+                let x = x.trim().to_owned();
+                if !x.is_empty() { Some(x) } else { None }
+            }));
+            acc
+        })
     }
 }

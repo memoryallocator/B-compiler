@@ -10,7 +10,6 @@ use token::{TokenPos, Constant};
 use crate::config::*;
 use crate::parser;
 use parser::ast::flat_ast::*;
-use parser::FlatAst;
 use parser::ast;
 
 #[derive(Debug, Clone)]
@@ -294,7 +293,6 @@ impl<'a> Analyzer<'a> {
                     FlatDefinitionInfo::Function { params } => {
                         DefInfo::Function(FnDef {
                             num_of_params: NumberOfParameters::Exact(params.len()),
-                            has_rvalue: true,
                         })
                     }
                 };
@@ -321,27 +319,12 @@ impl<'a> Analyzer<'a> {
         match &lv.lvalue {
             ast::Lvalue::Name(name) => {
                 let info = local_scope.get(name);
-                match info {
-                    None => {
-                        // TODO: suggestions
-                        issues.push(Issue::NameNotDefined {
-                            name: name.clone(),
-                            pos: lv.position,
-                        })
-                    }
-                    Some(DeclInfoAndPos { info, .. }) => {
-                        match info {
-                            ProcessedDeclInfo::AssumedExternFnCall(info)
-                            | ProcessedDeclInfo::ExplicitExtern(info) => {
-                                if let DefInfo::Function(
-                                    FnDef { has_rvalue: false, .. }
-                                ) = info.info {
-                                    issues.push(Issue::NameHasNoRvalue(name.clone(), lv.position))
-                                }
-                            }
-                            _ => (),
-                        }
-                    }
+                if info.is_none() {
+                    // TODO: suggestions
+                    issues.push(Issue::NameNotDefined {
+                        name: name.clone(),
+                        pos: lv.position,
+                    })
                 }
                 vec![]
             }

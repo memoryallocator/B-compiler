@@ -64,7 +64,6 @@ pub(crate) enum Issue {
     UnexpectedKeyword(TokenPos),
     CaseEncounteredTwice { curr: TokenPos, prev: TokenPos },
     LiteralTooLong(TokenPos),
-    NameHasNoRvalue(String, TokenPos),
     NoMainFn,
     InvalidParameterCount {
         expected: NumberOfParameters,
@@ -233,10 +232,6 @@ impl Display for Issue {
                 format!("the literal at {} is too long", pos)
             }
 
-            NameHasNoRvalue(name, pos) => {
-                format!("name {} at {} has no rvalue", name, pos)
-            }
-
             NoMainFn => {
                 "no main function found".to_owned()
             }
@@ -310,7 +305,7 @@ impl Default for TargetPlatform {
 
 pub(crate) struct CallingConvention {
     pub(crate) registers_to_pass_args: Vec<&'static str>,
-    pub(crate) shadow_space_size_in_bytes: u64,
+    pub(crate) use_shadow_space: bool,
     pub(crate) main_register: &'static str,
     pub(crate) supporting_registers: [&'static str; 2],
     pub(crate) alignment: u8,
@@ -325,23 +320,23 @@ impl TargetPlatform {
                 platform_name: PlatformName::Windows, arch: Arch::x86_64
             } => CallingConvention {
                 registers_to_pass_args: vec!["rcx", "rdx", "r8", "r9"],
-                shadow_space_size_in_bytes: 4 * 8,
+                use_shadow_space: true,
                 main_register: "rax",
                 supporting_registers: ["r10", "r11"],
                 alignment: 16,
                 reg_for_calls: "r14",
-                reg_for_initial_rsp: "r15",
+                reg_for_initial_rsp: "rbp",
             },
             TargetPlatform {
                 platform_name: PlatformName::Linux, arch: Arch::x86_64
             } => CallingConvention {
-                registers_to_pass_args: vec!["rdi", "rsi", "rdx", "r10", "r8", "r9"],
-                shadow_space_size_in_bytes: 0,
+                registers_to_pass_args: vec!["rdi", "rsi", "rdx", "rcx", "r8", "r9"],
+                use_shadow_space: false,
                 main_register: "rax",
-                supporting_registers: ["rcx", "r11"],
+                supporting_registers: ["r10", "r11"],
                 alignment: 16,
                 reg_for_calls: "r14",
-                reg_for_initial_rsp: "r15",
+                reg_for_initial_rsp: "rbp",
             },
         }
     }
@@ -360,8 +355,7 @@ impl TargetPlatform {
             },
             arch: {
                 if cfg!(target_pointer_width = "32") {
-                    eprintln!("32-bit platforms are not supported yet");
-                    unimplemented!()
+                    unimplemented!("32-bit platforms are not supported yet")
                 } else if cfg!(target_pointer_width = "64") {
                     Arch::x86_64
                 } else {
@@ -375,12 +369,19 @@ impl TargetPlatform {
     }
 }
 
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub(crate) enum Mode {
+    Ir,
+    Default,
+}
+
 #[derive(Copy, Clone)]
 pub(crate) struct CompilerOptions {
     pub(crate) target_platform: TargetPlatform,
     pub(crate) stack_size: u64,
     pub(crate) heap_size: u64,
     pub(crate) continue_is_enabled: bool,
+    pub(crate) mode: Mode,
 }
 
 impl Default for CompilerOptions {
@@ -390,6 +391,7 @@ impl Default for CompilerOptions {
             stack_size: 4096,
             heap_size: 65536,
             continue_is_enabled: false,
+            mode: Mode::Default,
         }
     }
 }
@@ -452,7 +454,6 @@ impl Display for NumberOfParameters {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub(crate) struct FnDef {
     pub(crate) num_of_params: NumberOfParameters,
-    pub(crate) has_rvalue: bool,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -503,17 +504,14 @@ pub(crate) fn get_standard_library_names() -> HashMap<&'static str, StdNameInfo>
             (name,
              StdNameInfo::Function(FnDef {
                  num_of_params: NumberOfParameters::Exact(num_of_params),
-                 has_rvalue: if name != "nargs" { true } else { false },
              })))
         .collect::<HashMap<&'static str, StdNameInfo>>();
 
     let printf = ("printf", StdNameInfo::Function(FnDef {
         num_of_params: NumberOfParameters::AtLeast(1),
-        has_rvalue: true,
     }));
     let concat = ("concat", StdNameInfo::Function(FnDef {
         num_of_params: NumberOfParameters::AtLeast(1),
-        has_rvalue: true,
     }));
     let mut std_lib_fns_with_variable_num_of_params = HashSet::new();
     std_lib_fns_with_variable_num_of_params.extend(vec![printf, concat].into_iter());

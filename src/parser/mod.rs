@@ -8,7 +8,7 @@ use crate::parser::analyzer::Analyzer;
 pub(crate) use crate::parser::analyzer::ScopeTable;
 pub(crate) use crate::parser::analyzer::{DeclInfoAndPos, DefInfoAndPos};
 use crate::parser::ast::*;
-use flat_ast::{FlatNodeAndPos, FlattenNode};
+use flat_ast::FlattenNode;
 
 use crate::config::*;
 use Issue::*;
@@ -18,8 +18,6 @@ use token::*;
 pub mod ast;
 mod expression_parser;
 pub(crate) mod analyzer;
-
-pub(crate) type FlatAst = Vec<FlatNodeAndPos>;
 
 pub(crate) trait Parse {
     fn parse(input: &[Token]) -> Result<(Self, usize), Vec<Issue>>

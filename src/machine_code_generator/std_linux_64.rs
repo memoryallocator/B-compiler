@@ -1,16 +1,23 @@
 use std::*;
+use iter::FromIterator;
 
 use super::*;
 
 use crate::config::*;
 
-const TARGET: TargetPlatform = WIN_64;
+const TARGET: TargetPlatform = LINUX_64;
 
 pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
     let call_conv = TARGET.calling_convention();
-    let stdin = internal_def("stdin");
-    let stdout = internal_def("stdout");
-    let proc_heap = internal_def("proc_heap");
+    let stdin = 0;
+    let stdout = 1;
+    let syscalls = HashMap::<&str, i32>::from_iter(vec![
+        ("read", 0),
+        ("write", 1),
+        ("mmap", 9),
+        ("munmap", 11),
+        ("exit", 60),
+    ].into_iter());
     let mut res = vec![];
 
     res.push(executable_section_or_segment(TARGET).to_owned());
@@ -21,132 +28,150 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
         res.push(format!("{}:", internal_def(name)));
         res.push(match name {
             "putchar" => format!(r"
-                    push r12
                     push r13
-                    lea r12, [rsp + (2 + 2) * 8]
-                    mov [r12], rdx
                     xor r13, r13
-                    lea rsp, [rsp - 5 * 8]
+                    lea rsp, [rsp - 2 * 8]
+                    mov [rsp], rsi
                 .loop:
-                    mov al, [r12 + r13]
+                    mov al, [rsp + r13]
                     test al, al
                     je .iter
                     cmp al, 4
                     je .iter
 
-                    mov rcx, [{stdout}]
-                    lea rdx, [r12 + r13]
-                    mov r8, 1
-                    lea r9, [rsp + (5 + 2 + 1) * 8]
-                    mov QWORD [rsp + 4*8], 0  ; 5th parameter
-                    call [WriteFile]
+                    mov rdi, {stdout}
+                    lea rsi, [rsp + r13]
+                    mov rdx, 1
+                    mov rax, {write}
+                    syscall
                 .iter:
                     cmp r13, 7
                     je .out
                     inc r13
                     jmp .loop
                 .out:
-                    lea rsp, [rsp + 5 * 8]
+                    lea rsp, [rsp + 2 * 8]
                     pop r13
-                    pop r12
-                    ret", stdout = stdout),
+                    ret", stdout = stdout, write = syscalls["write"]),
 
             "getchar" => format!(r"
-                    lea rdx, [rsp + 8]
-                    mov rcx, [{stdin}]
-                    mov r8, 1
-                    xor r9, r9
-                    push 0  ; 5th parameter
-                    lea rsp, [rsp - 4 * 8]
-                    call [ReadFile]
-                    lea rsp, [rsp + 5 * 8]
-                    movzx rax, BYTE [rsp + 8]
-                    ret", stdin = stdin),
+                    mov rdi, {stdin}
+                    lea rsp, [rsp - 8]
+                    mov rsi, rsp
+                    mov rdx, 1
+                    mov rax, {read}
+                    syscall
+                    movzx rax, BYTE [rsp]
+                    lea rsp, [rsp + 8]
+                    ret", stdin = stdin, read = syscalls["read"]),
 
-            "exit" => r"xor rcx, rcx
-                            jmp [ExitProcess]".to_owned(),
+            "exit" => format!(r"
+                            xor rdi, rdi
+                            mov rax, {exit}
+                            syscall", exit = syscalls["exit"]),
 
             "char" => r"
-                    rol rdx, 3
-                    movzx rax, BYTE [rdx + r8]
+                    rol rsi, 3
+                    movzx rax, BYTE [rsi + rdx]
                     ret".to_owned(),
 
-            "getvec" => format!(r"
-                    inc rdx
-                    mov r8, rdx
-                    shl r8, 3
-                    mov rcx, [{}]
-                    mov rdx, 0x00000008  ; HEAP_ZERO_MEMORY
-                    lea rsp, [rsp - 5 * 8]
-                    call [HeapAlloc]
-                    lea rsp, [rsp + 5 * 8]
-                    ror rax, 3
-                    ret", proc_heap),
+            "getvec" => {
+                const PROT_READ: i32 = 0x1;
+                const PROT_WRITE: i32 = 0x2;
+                const MAP_PRIVATE: i32 = 0x2;
+                const MAP_ANONYMOUS: i32 = 0x20;
+
+                format!(r"
+                    xor rdi, rdi
+                    inc rsi
+                    shl rsi, 3
+                    mov rdx, {prot}
+                    mov r10, {flags}
+                    mov r8, -1
+                    xor r9, r9
+                    mov rax, {mmap}
+                    lea rsp, [rsp - 8]
+                    syscall
+                    lea rsp, [rsp + 8]
+                    cmp rax, -4096
+                    ja .assign_null
+                    .ok:
+                        ror rax, 3
+                        ret
+                    .assign_null:
+                        xor rax, rax
+                        ret", prot = PROT_READ | PROT_WRITE,
+                        flags = MAP_PRIVATE | MAP_ANONYMOUS,
+                        mmap = syscalls["mmap"])
+            }
 
             "rlsevec" => format!(r"
-                    rol rdx, 3
-                    mov r8, rdx
-                    mov rcx, [{}]
-                    xor rdx, rdx
-                    lea rsp, [rsp - 5 * 8]
-                    call [HeapFree]
-                    lea rsp, [rsp + 5 * 8]
-                    ret", proc_heap),
+                    rol rsi, 3
+                    inc rdx
+                    mov rax, {munmap}
+                    lea rsp, [rsp - 8]
+                    syscall
+                    lea rsp, [rsp + 8]
+                    ret", munmap = syscalls["munmap"]),
 
             "printf" => format!(r"
+                    mov rax, [rsp]
+                    lea rsp, [rsp - 4 * 8]
+                    mov [rsp + 4*8], r9
+                    mov [rsp + 3*8], r8
+                    mov [rsp + 2*8], rcx
+                    mov [rsp + 1*8], rdx
+                    mov [rsp], rax
                     push r12
                     push r13
                     push r14
-                    lea r14, [rsp + (3 + 3) * 8]
-                    mov [r14], r8
-                    mov [r14 + 1*8], r9
-                    lea rsp, [rsp - 4 * 8]
-                    rol rdx, 3
-                    mov r12, rdx
+                    rol rsi, 3
+                    mov r12, rsi
+                    lea r14, [rsp + (3+1) * 8]
                 .loop:
-                    movzx rdx, BYTE [r12]
+                    movzx rsi, BYTE [r12]
                     inc r12
-                    cmp dl, '%'
+                    cmp rsi, '%'
                     je .format
-                    cmp dl, 4
+                    cmp rsi, 4
                     je .out
                     call {internal_putchar}
                     jmp .loop
 
                 .format:
-                    movzx rdx, BYTE [r12]
+                    movzx rsi, BYTE [r12]
                     inc r12
-                    cmp dl, 'd'
+                    cmp rsi, 'd'
                     je .dec
-                    cmp dl, 's'
+                    cmp rsi, 's'
                     je .str
-                    cmp dl, 'c'
+                    cmp rsi, 'c'
                     je .char
-                    cmp dl, 'o'
+                    cmp rsi, 'o'
                     je .oct
                     call {internal_putchar}
                     jmp .loop
 
-                .oct:
-                    mov rdx, [r14]
-                    mov r8, 8
-                    call {print_unsigned}
-                    jmp .advance_arg_and_repeat
-
                 .char:
-                    mov rdx, [r14]
+                    mov rsi, [r14]
                     call {internal_putchar}
                     jmp .advance_arg_and_repeat
 
                 .str:
-                    mov rdx, [r14]
+                    mov rsi, [r14]
                     call {internal_putstr}
                     jmp .advance_arg_and_repeat
 
+                .oct:
+                    mov rsi, [r14]
+                    mov rdx, 8
+                    call {print_unsigned}
+                    jmp .advance_arg_and_repeat
+
                 .min_word:
-                    mov rdx, '9'
+                    mov rsi, '9'
                     call {internal_putchar}
-                    mov rdx, 223'372'036'854'775'808
+                    mov rsi, 223'372'036'854'775'808
                     jmp .dec_unsigned_reg_is_set
 
                 .dec:
@@ -155,16 +180,16 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                     jns .dec_unsigned
 
                     .negative:
-                        mov rdx, '-'
+                        mov rsi, '-'
                         call {internal_putchar}
                         neg r13
                         test r13, r13
                         jz .min_word
 
                     .dec_unsigned:
-                        mov rdx, r13
+                        mov rsi, r13
                     .dec_unsigned_reg_is_set:
-                        mov r8, 10
+                        mov rdx, 10
                         call {print_unsigned}
 
                 .advance_arg_and_repeat:
@@ -172,33 +197,34 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                     jmp .loop
 
                 .out:
-                    lea rsp, [rsp + 4 * 8]
                     pop r14
                     pop r13
                     pop r12
-                    ret
+                    mov rax, [rsp]
+                    lea rsp, [rsp + 4 * 8]
+                    jmp rax
 
                 {print_unsigned}:
                     push r12
                     xor r12, r12
                     lea rsp, [rsp - 4 * 8]
-                    mov rax, rdx
-                    mov BYTE [rsp + (4+2) * 8 + {MAX_LEN}], 4
+                    mov rax, rsi
+                    mov r8, rdx
+                    mov BYTE [rsp + {MAX_LEN}], 4
 
                     .fill_digit_array:
                         inc r12
                         xor rdx, rdx
                         div r8
                         add dl, '0'
-                        lea rcx, [rsp + (4+2) * 8 + {MAX_LEN}]
-                        sub rcx, r12
-                        mov [rcx], dl
+                        lea rsi, [rsp + {MAX_LEN}]
+                        sub rsi, r12
+                        mov [rsi], dl
                         test rax, rax
                         jnz .fill_digit_array
 
                     .print:
-                        mov rdx, rcx
-                        ror rdx, 3
+                        ror rsi, 3
                         call {internal_putstr}
 
                     lea rsp, [rsp + 4 * 8]
@@ -210,25 +236,23 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
 
             "putstr" => format!(r"
                     push r15
-                    lea rsp, [rsp - 4 * 8]
-                    mov r15, rdx
+                    mov r15, rsi
                     rol r15, 3
 
                     .iter_str:
-                        movzx rdx, BYTE [r15]
-                        cmp dl, 4
+                        movzx rsi, BYTE [r15]
+                        cmp rsi, 4
                         je .out
                         call {internal_putchar}
                     .next_iter:
                         inc r15
                         jmp .iter_str
                     .out:
-                        lea rsp, [rsp + 4 * 8]
                         pop r15
                         ret", internal_putchar = internal_def("putchar")),
 
             "nargs" => {
-                format!("mov rax, [{base} + (2+1)*8]
+                format!("mov rax, [{base} - 8]
                         ret", base = call_conv.reg_for_initial_rsp)
             }
 
@@ -236,25 +260,10 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
         });
     }
 
-    res.push(readable_writable_section_or_segment(TARGET).to_owned());
-    res.extend(vec![format!("{} dq ?", stdout), format!("{} dq ?", stdin)]);
-    res.push(format!("{} dq ?", proc_heap));
-
     res.push(executable_section_or_segment(TARGET).to_owned());
     res.push(format!("{}:", START));
     res.push(MachineCodeGenerator::align_stack(call_conv.alignment));
-    res.push("sub rsp, 4 * 8".to_owned());
-    res.extend(&mut vec![
-        "mov rcx, -11",
-        "call [GetStdHandle]",
-        &format!("mov [{}], rax", internal_def("stdout")),
-        "mov rcx, -10",
-        "call [GetStdHandle]",
-        &format!("mov [{}], rax", internal_def("stdin")),
-        "call [GetProcessHeap]",
-        &format!("mov [{}], rax", internal_def("proc_heap")),
-    ].into_iter().map(String::from));
-    res.push("xor rcx, rcx".to_owned());
+    res.push("xor rdi, rdi".to_owned());
     res.push(format!("call {}", mangle_global_def("main")));
     res.push(format!("jmp {}", mangle_global_def("exit")));
     res

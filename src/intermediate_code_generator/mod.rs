@@ -131,7 +131,6 @@ pub(crate) enum IntermRepr {
     LvUnary(IncDec),
     RvUnary(RvalueUnary),
     Call { nargs: u64 },
-    Nargs,
     Goto,
     Ret,
 }
@@ -194,6 +193,12 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 vec![LoadLvalue(
                     if let Some(info) = self.local_scope.unwrap().get(name) {
                         match info.info {
+                            ProcessedDeclInfo::Label => {
+                                Lvalue::Label(Label::Local(name.clone()))
+                            }
+                            ProcessedDeclInfo::FnParameter { param_no } => {
+                                Lvalue::NthArg(1 + param_no)
+                            }
                             ProcessedDeclInfo::AssumedExternFnCall(_)
                             | ProcessedDeclInfo::ExplicitExtern(_) => {
                                 Lvalue::Label(Label::Global(name.clone()))
@@ -206,12 +211,6 @@ impl<'a> IntermediateCodeGenerator<'a> {
                                 } else {
                                     unreachable!()
                                 }
-                            }
-                            ProcessedDeclInfo::Label => {
-                                Lvalue::Label(Label::Local(name.clone()))
-                            }
-                            ProcessedDeclInfo::FnParameter { param_no } => {
-                                Lvalue::NthArg(param_no)
                             }
                         }
                     } else {
@@ -334,17 +333,6 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 self.process_rvalue(&rv.rvalue)
             }
             Rvalue::FunctionCall(FunctionCallNode { fn_name, arguments }) => {
-                if let Rvalue::Lvalue(
-                    ast::LvalueNode { lvalue: ast::Lvalue::Name(fn_name), .. }
-                ) = &*fn_name.rvalue {
-                    if fn_name == "nargs" {
-                        if let Some(
-                            DefInfoAndPos { pos_if_user_defined: None, .. }
-                        ) = self.global_definitions.get("nargs") {
-                            return vec![Nargs];
-                        }
-                    }
-                }
                 let mut res = vec![];
                 for arg in arguments.iter().rev() {
                     res.extend(self.process_rvalue(&arg.rvalue));

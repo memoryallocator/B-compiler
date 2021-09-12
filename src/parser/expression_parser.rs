@@ -2,6 +2,7 @@ use std::*;
 use collections::VecDeque;
 use convert::TryFrom;
 use cell::Cell;
+use iter::FromIterator;
 
 use crate::tokenizer::token;
 use token::*;
@@ -584,7 +585,7 @@ impl Parse for RvalueNode {
             use RichBinaryOperation::*;
             use LeftOrRight::*;
 
-            let bin_op_priority = HashMap::<Operator, i32>::from((|| {
+            let bin_op_priority = HashMap::<Operator, i32>::from_iter((|| {
                 fn map_priority(ops: Vec<Operator>, priority: i32) -> Vec<(Operator, i32)> {
                     ops.into_iter()
                         .map(|op| (op, priority))
@@ -655,7 +656,7 @@ impl Parse for RvalueNode {
                 }
 
                 res
-            })().into_iter().collect());
+            })().into_iter());
 
             fn token_to_binary_operator(x: &Token) -> Option<Operator> {
                 if let Token { token: WrappedToken::Operator(op), .. } = x {

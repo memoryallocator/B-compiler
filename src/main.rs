@@ -1,5 +1,5 @@
 use std::*;
-use process;
+use process::exit;
 use fs;
 use io::Write;
 
@@ -11,16 +11,45 @@ mod config;
 mod intermediate_code_generator;
 mod machine_code_generator;
 
+fn write_to_file_and_exit(data: Vec<String>, file: &str) -> ! {
+    let ok: Result<(), io::Error> = (|| {
+        let mut file = fs::File::create(file)?;
+        for (i, line) in data.iter().enumerate() {
+            file.write(line.as_bytes())?;
+            if i < data.len() - 1 {
+                file.write(&['\n' as u8])?;
+            }
+        }
+        exit(0);
+    })();
+    if let Err(err) = ok {
+        eprintln!("Something went wrong writing the output file: {}", err);
+        eprintln!("\n\n\n");
+        for line in data {
+            println!("{}", line)
+        }
+        exit(1);
+    } else {
+        unreachable!()
+    }
+}
+
 fn parse_command_line_arguments() -> Result<(String, CompilerOptions, String), String> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         return Err("not enough arguments".to_owned());
     }
 
+    let mut out_path = "a.asm".to_owned();
     let mut opts = CompilerOptions::default();
     let stack_pat = "--stack=";
     let heap_pat = "--heap=";
     let enable_continue_pat = "--enable-continue";
+    let platform_pat = "--platform=";
+    let arch_pat = "--arch=";
+    let ir_pat = "--ir";
+    let out_pat = "--out=";
+
     let mut path = None;
     let mut i: usize = 1;
     while i < args.len() {
@@ -30,8 +59,14 @@ fn parse_command_line_arguments() -> Result<(String, CompilerOptions, String), S
                 return Err("unknown option: ".to_owned() + curr);
             }
             path = Some(curr);
+            i += 1;
+            continue;
         }
-        if curr.starts_with(enable_continue_pat) {
+        if curr.starts_with(out_pat) {
+            out_path = curr[out_pat.len()..].to_owned();
+        } else if curr.starts_with(ir_pat) {
+            opts.mode = Mode::Ir;
+        } else if curr.starts_with(enable_continue_pat) {
             opts.continue_is_enabled = true;
         } else if curr.starts_with(heap_pat) {
             let heap_size = curr[heap_pat.len()..].parse::<u64>();
@@ -47,11 +82,41 @@ fn parse_command_line_arguments() -> Result<(String, CompilerOptions, String), S
             } else {
                 return Err("failed to parse stack size".to_owned());
             }
+        } else if curr.starts_with(platform_pat) {
+            let platform = curr[platform_pat.len()..].to_ascii_lowercase();
+            match platform.as_ref() {
+                "linux" => {
+                    opts.target_platform.platform_name = PlatformName::Linux;
+                }
+                "win" => {
+                    opts.target_platform.platform_name = PlatformName::Windows;
+                }
+                _ => {
+                    unimplemented!("The platform {} you specified \
+                                    is either unknown or unsupported", platform)
+                }
+            }
+        } else if curr.starts_with(arch_pat) {
+            let arch = curr[arch_pat.len()..].to_ascii_lowercase();
+            match arch.as_ref() {
+                "x86-64" | "x64" | "x86_64" | "amd64" => {
+                    opts.target_platform.arch = Arch::x86_64;
+                }
+                _ => {
+                    unimplemented!("The architecture {} you specified \
+                                    is either unknown or unsupported", arch)
+                }
+            }
+        } else {
+            return Err("unknown option: ".to_owned() + curr);
         }
         i += 1;
     }
+    if out_path.is_empty() {
+        return Err("the output file path cannot be empty".to_owned());
+    }
     if let Some(path) = path {
-        Ok((path.clone(), opts, "a.asm".to_owned()))
+        Ok((path.clone(), opts, out_path))
     } else {
         Err("no input path specified".to_owned())
     }
@@ -119,27 +184,13 @@ fn main() {
                                                                       &scope_table.global);
     let (intermediate_code, pooled_strings) = processor.run(&scope_table);
 
+    if compiler_options.mode == Mode::Ir {
+        write_to_file_and_exit(intermediate_code.into_iter()
+                                   .map(|x| format!("{:?}", x)).collect(), &output_file)
+    }
     let processor = machine_code_generator::MachineCodeGenerator::new(compiler_options,
                                                                       intermediate_code,
                                                                       pooled_strings);
     let res = processor.run();
-
-    let ok: Result<(), io::Error> = (|| {
-        let mut output_file = fs::File::create(output_file)?;
-        for (i, line) in res.iter().enumerate() {
-            output_file.write(line.as_bytes())?;
-            if i < res.len() - 1 {
-                output_file.write(&['\n' as u8])?;
-            }
-        }
-        Ok(())
-    })();
-    if let Err(err) = ok {
-        eprintln!("Something went wrong writing the output file: {}", err);
-        eprintln!("\n\n\n");
-        for line in res {
-            println!("{}", line)
-        }
-        process::exit(1);
-    }
+    write_to_file_and_exit(res, &output_file);
 }
