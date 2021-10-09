@@ -14,12 +14,7 @@ mod machine_code_generator;
 fn write_to_file_and_exit(data: Vec<String>, file: &str) -> ! {
     let ok: Result<(), io::Error> = (|| {
         let mut file = fs::File::create(file)?;
-        for (i, line) in data.iter().enumerate() {
-            file.write(line.as_bytes())?;
-            if i < data.len() - 1 {
-                file.write(&['\n' as u8])?;
-            }
-        }
+        file.write(data.join("\n").as_bytes())?;
         exit(0);
     })();
     if let Err(err) = ok {
@@ -189,7 +184,7 @@ fn main() {
                                    .map(|x| format!("{:?}", x)).collect(), &output_file)
     }
     let processor = machine_code_generator::MachineCodeGenerator::new(compiler_options,
-                                                                      intermediate_code,
+                                                                      &intermediate_code,
                                                                       pooled_strings);
     let res = processor.run();
     write_to_file_and_exit(res, &output_file);

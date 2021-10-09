@@ -237,7 +237,7 @@ impl Display for Issue {
             }
 
             InvalidParameterCount { expected, actual, pos } => {
-                format!("{}: expected {} parameters, got {}", pos, expected, actual)
+                format!("{}: expected {} parameter(s), got {}", pos, expected, actual)
             }
         })
     }

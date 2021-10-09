@@ -936,7 +936,7 @@ impl Parse for Statement {
             }
             t => {
                 if let Name(_) = t {
-                    if input[1].token == WrappedToken::Colon {
+                    if input.len() > 1 && input[1].token == WrappedToken::Colon {
                         let (label_decl, adv) = DeclarationNode::parse(input)?;
                         return Ok((Statement::Declaration(label_decl), adv));
                     }
@@ -1168,7 +1168,7 @@ impl Parser<'_> {
             Ok(prog_node) => {
                 let res = prog_node.flatten_node();
                 let mut analyzer = Analyzer::new(self.source_code);
-                Ok(analyzer.run(res, issues))
+                Ok(analyzer.run(&res, issues))
             }
         }
     }

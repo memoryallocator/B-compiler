@@ -87,8 +87,6 @@ pub(crate) struct FlatNodeAndPos {
     pub(crate) pos: TokenPos,
 }
 
-pub(crate) type FlatAst = Vec<FlatNodeAndPos>;
-
 impl FlattenNode for ProgramNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
         self.definitions.into_iter().map(|def| def.flatten_node()).flatten().collect()
@@ -111,11 +109,7 @@ impl FlattenNode for VariableDefinitionNode {
             node: FlatNode::Def(FlatDefinition {
                 name: self.name,
                 info: FlatDefinitionInfo::Variable {
-                    ival: if let Some(ival) = self.initial_value {
-                        Some(Ival::from(ival))
-                    } else {
-                        None
-                    }
+                    ival: self.initial_value.map(Ival::from)
                 },
             }),
             pos: self.position,
@@ -157,14 +151,14 @@ impl FlattenNode for FunctionDefinitionNode {
 
 impl FlattenNode for StatementNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
-        let append_end_marker = (|| {
+        let append_end_marker = {
             use Statement::*;
             if let Compound(_) | Switch(_) | If(_) | While(_) = self.statement.as_ref() {
                 true
             } else {
                 false
             }
-        })();
+        };
         let mut res = match *self.statement {
             Statement::NullStatement => vec![],
             Statement::Compound(comp_stmt) => comp_stmt.flatten_node(),

@@ -13,34 +13,32 @@ pub(crate) struct Tokenizer<'a> {
     pub(crate) compiler_options: CompilerOptions,
 }
 
-fn parse_assign_binary_operator<'a, I>(op: I) -> Option<(RichBinaryOperation, usize)>
-    where I: Iterator<Item=char> {
+fn parse_assign_binary_operator(s: &str) -> Option<(RichBinaryOperation, usize)> {
     use BinaryOperation::*;
     use BinaryRelation::*;
     use RichBinaryOperation::*;
     use LeftOrRight::*;
 
-    let s: Vec<char> = op.take(2).collect();
     return Some(
-        match s[..2] {
+        match s.chars().take(2).collect::<Vec<char>>().as_slice() {
             ['=', '='] => (RegularBinary(Cmp(Eq)), 2),
             ['!', '='] => (RegularBinary(Cmp(Ne)), 2),
-
-            ['<', '<'] => (RegularBinary(Shift(Left)), 2),
-            ['>', '>'] => (RegularBinary(Shift(Right)), 2),
 
             ['<', '='] => (RegularBinary(Cmp(Le)), 2),
             ['>', '='] => (RegularBinary(Cmp(Ge)), 2),
 
-            ['&', _] => (BitwiseAnd, 1),
-            ['|', _] => (RegularBinary(Or), 1),
-            ['^', _] => (RegularBinary(Xor), 1),
+            ['<', '<'] => (RegularBinary(Shift(Left)), 2),
+            ['>', '>'] => (RegularBinary(Shift(Right)), 2),
+
+            ['<', _] => (RegularBinary(Cmp(Lt)), 1),
+            ['>', _] => (RegularBinary(Cmp(Gt)), 1),
 
             ['+', _] => (Add, 1),
             ['-', _] => (Sub, 1),
 
-            ['<', _] => (RegularBinary(Cmp(Lt)), 1),
-            ['>', _] => (RegularBinary(Cmp(Gt)), 1),
+            ['&', _] => (BitwiseAnd, 1),
+            ['|', _] => (RegularBinary(Or), 1),
+            ['^', _] => (RegularBinary(Xor), 1),
 
             ['*', _] => (Mul, 1),
             ['/', _] => (RegularBinary(Div), 1),
@@ -50,8 +48,7 @@ fn parse_assign_binary_operator<'a, I>(op: I) -> Option<(RichBinaryOperation, us
     );
 }
 
-fn parse_operator<'a, I>(op: I) -> Option<(Operator, usize)>
-    where I: Iterator<Item=char> {
+fn parse_operator(s: &str) -> Option<(Operator, usize)> {
     use Operator::*;
     use UnaryOperation::*;
     use BinaryOperation::*;
@@ -60,21 +57,20 @@ fn parse_operator<'a, I>(op: I) -> Option<(Operator, usize)>
     use token::IncOrDec::*;
     use token::Assign as AssignStruct;
 
-    let s: Vec<char> = op.take(3).collect();
     return Some(
-        match s[..3] {
+        match s.chars().take(3).collect::<Vec<char>>().as_slice() {
             ['+', '+', _] => (IncDec(Increment), 2),
             ['-', '-', _] => (IncDec(Decrement), 2),
 
             ['+', _, _] => (Plus, 1),
             ['-', _, _] => (Minus, 1),
 
+            ['&', _, _] => (Ampersand, 1),
+            ['*', _, _] => (Asterisk, 1),
+
             ['!', '=', _] => (Binary(Cmp(Ne)), 2),
             ['!', _, _] => (Unary(LogicalNot), 1),
             ['~', _, _] => (Unary(Complement), 1),
-
-            ['&', _, _] => (Ampersand, 1),
-            ['*', _, _] => (Asterisk, 1),
 
             ['=', '=', '='] => (Assign(AssignStruct::from(RegularBinary(Cmp(Eq)))), 3),
             ['=', '=', _] => (Binary(Cmp(Eq)), 2),
@@ -82,8 +78,7 @@ fn parse_operator<'a, I>(op: I) -> Option<(Operator, usize)>
             ['=', _, _] => {
                 if let Some(
                     (rich_bin_op, rich_bin_op_len)
-                ) = parse_assign_binary_operator(
-                    s[1..].into_iter().cloned()) {
+                ) = parse_assign_binary_operator(&s[1..]) {
                     (Assign(AssignStruct::from(rich_bin_op)), 1 + rich_bin_op_len)
                 } else {
                     (Assign(AssignStruct::from(None)), 1)
@@ -93,8 +88,7 @@ fn parse_operator<'a, I>(op: I) -> Option<(Operator, usize)>
             _ => {
                 if let Some(
                     (rich_bin_op, rich_bin_op_len)
-                ) = parse_assign_binary_operator(
-                    s.into_iter()) {
+                ) = parse_assign_binary_operator(s) {
                     if let RegularBinary(bin_op) = rich_bin_op {
                         (Binary(bin_op), rich_bin_op_len)
                     } else {
@@ -309,9 +303,7 @@ impl Tokenizer<'_> {
                             pos: token_pos,
                         }),
                     _ => {
-                        if let Some(
-                            (op, tokens_read)
-                        ) = parse_operator(source_code[i..].chars().into_iter()) {
+                        if let Some((op, tokens_read)) = parse_operator(&source_code[i..]) {
                             res.push(Token {
                                 token: WrappedToken::Operator(op),
                                 pos: token_pos,
@@ -329,14 +321,11 @@ impl Tokenizer<'_> {
 
             i += 1;
         }
-
         if let Some((currently_reading, opening_literal_pos)) = currently_reading {
             let closing_literal = currently_reading.get_closing_literal();
-
             return Err(format!("expected {} (opening literal found in {}), found end of file",
                                closing_literal, opening_literal_pos), );
         }
-
         Ok(res)
     }
 
@@ -346,124 +335,5 @@ impl Tokenizer<'_> {
         issues: &mut Vec<Issue>,
     ) -> Result<Vec<Token>, String> {
         Ok(self.tokenize(&source_code, issues)?)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::borrow::Borrow;
-
-    use crate::config::{get_reserved_symbols, get_second_symbol_of_escape_sequence_to_character_mapping};
-
-    use super::*;
-
-    fn lexical_analyzer_test<S: AsRef<String>, Z: AsRef<str>>(
-        inp: S,
-        exp_out: Result<&Vec<Token>, String>,
-        panic_msg: Option<Z>,
-        scan_first: bool,
-        compiler_options: &CompilerOptions,
-        keywords: &ReservedSymbolsTable,
-        second_symbol_of_escape_sequence_to_character_mapping: &HashMap<char, char>,
-    ) -> Result<(), String> {
-        let inp = inp.as_ref();
-        let exp_out = exp_out.as_ref();
-        let mut la = Tokenizer {
-            compiler_options,
-            second_symbol_of_escape_sequence_to_character_mapping,
-            reserved_symbols: keywords,
-        };
-
-        let mut after_scan: String;
-        if scan_first {
-            after_scan = la.remove_comments(inp)?;
-        } else {
-            after_scan = inp.clone();
-        }
-        let res = la.tokenize(&after_scan);
-        if let Err(exp_err) = exp_out {
-            if let Ok(_) = res {
-                return Err(String::from(format!("generate_tokens() returned tokens instead of expected error message {}", exp_err)));
-            }
-            match panic_msg {
-                None => assert_eq!(&res.unwrap_err(), exp_err),
-                Some(msg) => assert_eq!(&res.unwrap_err(), exp_err, "{}", msg.as_ref()),
-            }
-        } else {
-            if let Err(_) = res {
-                return Err(String::from(format!("generate_tokens() returned error instead of expected tokens")));
-            }
-            match panic_msg {
-                None => assert_eq!(res.unwrap(), **exp_out.unwrap()),
-                Some(msg) => assert_eq!(res.unwrap(), **exp_out.unwrap(), "{}", msg.as_ref()),
-            }
-        }
-        Ok(())
-    }
-
-    fn scanner_test<S: Borrow<String>, T: Borrow<String>, Z: Borrow<str>>(
-        inp: S,
-        exp_out: T,
-        panic_msg: Option<Z>,
-    ) -> Result<(), String> {
-        let inp = inp.borrow();
-        let exp_out = exp_out.borrow();
-        let co = CompilerOptions::default();
-        let esm = get_second_symbol_of_escape_sequence_to_character_mapping();
-        let kw = get_reserved_symbols();
-        let la = Tokenizer {
-            compiler_options: &co,
-            second_symbol_of_escape_sequence_to_character_mapping: &esm,
-            reserved_symbols: &kw,
-        };
-
-        let res = la.remove_comments(inp)?;
-        let ans = exp_out;
-        match panic_msg {
-            None => assert_eq!(res, *ans),
-            Some(msg) => assert_eq!(res, *ans, "{}", msg.borrow()),
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn test_scanner_remove_comments() -> Result<(), String> {
-        scanner_test(String::from("\
-        main() {\
-        auto a, b  /* my comment\
-
-        */;\
-        }\
-        "), String::from("\
-        main() {\
-        auto a, b  \
-
-        ;\
-        }\
-"), None::<Box<str>>)
-    }
-
-    #[test]
-    fn test_scanner_strings_containing_comments() -> Result<(), String> {
-        let test_res = scanner_test(String::from("\
-        main() {
-            a \" /* my string containing comment */ \";
-        }"),
-                                    String::from("\
-        main() {
-            a \" /* my string containing comment */ \";
-        }"),
-                                    None::<Box<str>>)?;
-
-        scanner_test(String::from("\
-        main() {
-        a \"a     long    string  \";
-        b \"a long string that contains a /*comment*/\";
-        }"),
-                     String::from("\
-        main() {
-        a \"a     long    string  \";
-        b \"a long string that contains a /*comment*/\";
-        }"), None::<Box<str>>)
     }
 }

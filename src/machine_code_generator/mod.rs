@@ -13,9 +13,9 @@ use crate::tokenizer;
 use tokenizer::char_to_u64;
 use tokenizer::token::{IncOrDec, BinaryRelation, LeftOrRight};
 
-pub(crate) struct MachineCodeGenerator {
+pub(crate) struct MachineCodeGenerator<'a> {
     pub(crate) compiler_options: CompilerOptions,
-    intermediate_code: Vec<IntermRepr>,
+    intermediate_code: &'a [IntermRepr],
     pooled_strings: HashMap<String, u64>,
 }
 
@@ -85,10 +85,10 @@ fn declare_word_directive(word_size: u8) -> &'static str {
     }
 }
 
-impl MachineCodeGenerator {
+impl<'a> MachineCodeGenerator<'a> {
     pub(crate) fn new(
         compiler_options: CompilerOptions,
-        intermediate_code: Vec<IntermRepr>,
+        intermediate_code: &'a [IntermRepr],
         pooled_strings: HashMap<String, u64>,
     ) -> Self {
         MachineCodeGenerator {
@@ -129,12 +129,10 @@ impl MachineCodeGenerator {
 
         res.extend(match target {
             WIN_64 => {
-                use std_win_64::generate_std_lib_and_internals;
-                generate_std_lib_and_internals()
+                std_win_64::generate_std_lib_and_internals()
             }
             LINUX_64 => {
-                use std_linux_64::generate_std_lib_and_internals;
-                generate_std_lib_and_internals()
+                std_linux_64::generate_std_lib_and_internals()
             }
         });
         res
@@ -202,21 +200,6 @@ impl MachineCodeGenerator {
                 if stack_var_count > 0
                     add rsp, {word_size}*stack_var_count
                 end if", word_size = word_size));
-        res
-    }
-
-    fn deref_to_reg(&self, dst: &str, src: &str) -> Vec<String> {
-        let mut res = vec![];
-        res.push(format!("rol {},{}", src, self.get_lvalue_offset_in_bits()));
-        res.push(format!("mov {},[{}]", dst, src));
-        res
-    }
-
-    fn write_lvalue(&self, addr: &str, val: &str) -> Vec<String> {
-        let mut res = vec![];
-        res.push(format!("rol {},{}", addr, self.get_lvalue_offset_in_bits()));
-        res.push(format!("mov [{addr}],{val}", addr = addr, val = val));
-        res.push(format!("mov {addr},{val}", addr = addr, val = val));
         res
     }
 
@@ -330,7 +313,7 @@ impl MachineCodeGenerator {
 
         let mut user_defined = HashSet::new();
 
-        for ir in &self.intermediate_code {
+        for ir in self.intermediate_code {
             let regs_for_args_len = regs_for_args.len() as u64;
             match ir {
                 LoadLvalue(lv) => {
@@ -383,13 +366,15 @@ impl MachineCodeGenerator {
                 WriteLvalue => {
                     let supp_reg = supp_regs[0];
                     res.push(format!("pop {}", supp_reg));
-                    res.extend(self.write_lvalue(supp_reg, main_reg));
+                    res.push(format!("rol {},{}", supp_reg, self.get_lvalue_offset_in_bits()));
+                    res.push(format!("mov [{}],{}", supp_reg, main_reg));
                 }
                 LoadConstant(constant) => {
                     res.push(format!("mov {},{}", main_reg, constant))
                 }
                 Deref => {
-                    res.extend(self.deref_to_reg(main_reg, main_reg));
+                    res.push(format!("rol {},{}", main_reg, self.get_lvalue_offset_in_bits()));
+                    res.push(format!("mov {},[{0}]", main_reg));
                 }
                 DeclLabel(lbl) => {
                     res.push(format!("{}:", mangle_label(&lbl)))
@@ -400,15 +385,13 @@ impl MachineCodeGenerator {
                 Jump(lbl_id) => {
                     res.push(format!("jmp {}", internal_label(*lbl_id)))
                 }
-                JmpIfEq(lbl_id) => {
-                    res.push(format!("je {}", internal_label(*lbl_id)))
+                CaseJmpIfEq { case_val, label_no } => {
+                    res.push(format!("cmp {},{}", main_reg, case_val));
+                    res.push(format!("je {}", internal_label(*label_no)))
                 }
                 TestAndJumpIfZero(lbl_id) => {
                     res.push(format!("test {},{0}", main_reg));
                     res.push(format!("jz {}", internal_label(*lbl_id)));
-                }
-                CaseEq { case_val } => {
-                    res.push(format!("cmp {},{}", main_reg, case_val));
                 }
                 Save => {
                     res.push(format!("push {}", main_reg))
@@ -478,7 +461,7 @@ impl MachineCodeGenerator {
                     args_passed_to_curr_fn = Some(args_to_curr_fn);
 
                     let words_needed =
-                        info.stack_size + if !use_shadow_space { num_of_args_to_save } else { 0 };
+                        info.stack_size + if use_shadow_space { 0 } else { num_of_args_to_save };
                     if words_needed != 0 {
                         res.push(format!("sub rsp,{}*{}", words_needed, word_size));
                     }
@@ -527,19 +510,12 @@ impl MachineCodeGenerator {
             res.push(readonly_section_or_segment(target).to_owned());
             for (s, n) in &self.pooled_strings {
                 res.push(format!("{}:", pooled_str_label(*n)));
-                let s = (|| {
-                    let mut res = String::new();
-                    let mut first = true;
-                    for v in self.pack_string_and_append_eot(s) {
-                        if !first {
-                            res += ",";
-                        }
-                        res += &v.to_string();
-                        first = false;
-                    }
-                    res
-                })();
-                res.push(format!("dq {}", s));
+                let s_as_words = self.pack_string_and_append_eot(s)
+                    .into_iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<String>>()
+                    .join(",");
+                res.push(format!("dq {}", s_as_words));
                 res.push(format!("{}:", pooled_str_end(*n)))
             }
         }

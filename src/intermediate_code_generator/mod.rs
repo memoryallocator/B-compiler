@@ -123,9 +123,8 @@ pub(crate) enum IntermRepr {
     DeclLabel(String),
     InternalLabel(u64),
     Jump(u64),
-    JmpIfEq(u64),
+    CaseJmpIfEq { case_val: u64, label_no: u64 },
     TestAndJumpIfZero(u64),
-    CaseEq { case_val: u64 },
     Save,
     BinOp(BinaryOp),
     LvUnary(IncDec),
@@ -569,16 +568,14 @@ impl<'a> IntermediateCodeGenerator<'a> {
                                 self.last_breakable_stmt_idxs_stack.pop();
                                 let mut case_table = vec![];
                                 for CaseWithVal { case_val, label_no } in regular_cases {
-                                    case_table.push(CaseEq { case_val });
-                                    case_table.push(JmpIfEq(label_no));
+                                    case_table.push(CaseJmpIfEq { case_val, label_no });
                                 }
                                 if let Some(default_case_label) = default_case_label {
                                     case_table.push(Jump(default_case_label));
                                 } else {
                                     case_table.push(Jump(after_last_stmt));
                                 }
-                                case_table.extend(res);
-                                res = case_table;
+                                res.splice(0..0, case_table);
                                 res.push(InternalLabel(after_last_stmt));
                             }
                         }

@@ -179,19 +179,18 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                     ret
 
                 {print_unsigned}:
-                    push r12
-                    xor r12, r12
-                    lea rsp, [rsp - 4 * 8]
+                    xor r9, r9
+                    lea rsp, [rsp - (1+4) * 8]
                     mov rax, rdx
                     mov BYTE [rsp + (4+2) * 8 + {MAX_LEN}], 4
 
                     .fill_digit_array:
-                        inc r12
+                        inc r9
                         xor rdx, rdx
                         div r8
                         add dl, '0'
                         lea rcx, [rsp + (4+2) * 8 + {MAX_LEN}]
-                        sub rcx, r12
+                        sub rcx, r9
                         mov [rcx], dl
                         test rax, rax
                         jnz .fill_digit_array
@@ -201,8 +200,7 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                         ror rdx, 3
                         call {internal_putstr}
 
-                    lea rsp, [rsp + 4 * 8]
-                    pop r12
+                    lea rsp, [rsp + (1+4) * 8]
                     ret", MAX_LEN = 22,
                                 internal_putchar = internal_def("putchar"),
                                 print_unsigned = internal_def("print_unsigned"),
@@ -244,7 +242,7 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
     res.push(format!("{}:", START));
     res.push(MachineCodeGenerator::align_stack(call_conv.alignment));
     res.push("sub rsp, 4 * 8".to_owned());
-    res.extend(&mut vec![
+    res.extend(vec![
         "mov rcx, -11",
         "call [GetStdHandle]",
         &format!("mov [{}], rax", internal_def("stdout")),

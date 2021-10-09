@@ -115,13 +115,12 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                     ret", munmap = syscalls["munmap"]),
 
             "printf" => format!(r"
-                    mov rax, [rsp]
-                    lea rsp, [rsp - 4 * 8]
-                    mov [rsp + 4*8], r9
-                    mov [rsp + 3*8], r8
-                    mov [rsp + 2*8], rcx
-                    mov [rsp + 1*8], rdx
-                    mov [rsp], rax
+                    pop rax
+                    push r9
+                    push r8
+                    push rcx
+                    push rdx
+                    push rax
                     push r12
                     push r13
                     push r14
@@ -200,25 +199,24 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                     pop r14
                     pop r13
                     pop r12
-                    mov rax, [rsp]
-                    lea rsp, [rsp + 4 * 8]
+                    pop rax
+                    lea rsp, [rsp + (4-1) * 8]
                     jmp rax
 
                 {print_unsigned}:
-                    push r12
-                    xor r12, r12
-                    lea rsp, [rsp - 4 * 8]
+                    xor rcx, rcx
+                    lea rsp, [rsp - 3 * 8]
                     mov rax, rsi
                     mov r8, rdx
                     mov BYTE [rsp + {MAX_LEN}], 4
 
                     .fill_digit_array:
-                        inc r12
+                        inc rcx
                         xor rdx, rdx
                         div r8
                         add dl, '0'
                         lea rsi, [rsp + {MAX_LEN}]
-                        sub rsi, r12
+                        sub rsi, rcx
                         mov [rsi], dl
                         test rax, rax
                         jnz .fill_digit_array
@@ -227,8 +225,7 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                         ror rsi, 3
                         call {internal_putstr}
 
-                    lea rsp, [rsp + 4 * 8]
-                    pop r12
+                    lea rsp, [rsp + 3 * 8]
                     ret", MAX_LEN = 22,
                                 internal_putchar = internal_def("putchar"),
                                 print_unsigned = internal_def("print_unsigned"),

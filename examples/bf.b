@@ -1,29 +1,25 @@
 TAPE_SIZE 30000;
 CELL_SIZE 256;
 
-free(v) {
-    if (v == 0) {
-        return;
-    }
-    rlsevec(v, -1);
-}
-
-realloc(v, n) {
+realloc(v, curr_sz, n) {
     if (n == 0) {
         return;
     }
     auto new; new = getvec(n - 1);
     auto i; i = 0;
-    while (i < n) {
+    auto mn; mn = n < curr_sz ? n : curr_sz;
+    while (i < mn) {
         new[i] = v[i];
         ++i;
     }
-    free(v);
+    if (curr_sz != 0) {
+        rlsevec(v, curr_sz - 1);
+    }
     return ( new );
 }
 
 append(v, n, x) {
-    auto new; new = realloc(v, n + 1);
+    auto new; new = realloc(v, n, n + 1);
     new[n] = x;
     return ( new );
 }

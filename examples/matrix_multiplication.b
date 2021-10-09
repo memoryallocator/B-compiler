@@ -53,10 +53,10 @@ print_matrix(M, rows, cols) {
     }
 }
 
-free_matrix(M, rows) {
+free_matrix(M, rows, cols) {
     auto i; i = 0;
     while (i < rows) {
-        rlsevec(M[i], -1);
+        rlsevec(M[i], cols - 1);
         ++i;
     }
     rlsevec(M, rows - 1);
@@ -77,11 +77,11 @@ main() {
     B[1][0] = 9; B[1][1] = 24; B[1][2] = 31;
 
     auto C; C = matrix_multiply(A, a_rows, a_cols, B, b_rows, b_cols);
-    free_matrix(A, a_rows);
-    free_matrix(B, b_rows);
+    free_matrix(A, a_rows, a_cols);
+    free_matrix(B, b_rows, b_cols);
 
     print_matrix(C, a_rows, b_cols);
-    free_matrix(C, a_rows);
+    free_matrix(C, a_rows, b_cols);
     putstr("Press Enter to exit");
     getchar();
 }

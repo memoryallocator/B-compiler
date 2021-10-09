@@ -203,7 +203,7 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    fn set_global_scope(&mut self, program: &FlatAst, issues: &mut Vec<Issue>) {
+    fn set_global_scope(&mut self, program: &[FlatNodeAndPos], issues: &mut Vec<Issue>) {
         let mut names_needed_for_init = HashMap::<&str, TokenPos>::new();
         let standard_scope = Cell::new(get_standard_library_names()
             .into_iter()
@@ -459,7 +459,7 @@ impl<'a> Analyzer<'a> {
         let fn_starts_at = function[0].pos;
 
         let mut local_scope = LocalScope::new();
-        let labels: Vec<(&FlatDeclaration, TokenPos)> = function
+        function
             .iter()
             .filter_map(|node|
                 if let FlatNode::Decl(
@@ -469,14 +469,12 @@ impl<'a> Analyzer<'a> {
                 } else {
                     None
                 })
-            .collect();
-
-        for (label_decl, pos) in labels.into_iter() {
-            self.add_explicit_decl_to_scope(label_decl, pos,
-                                            &mut local_scope,
-                                            (fn_name, function[0].pos),
-                                            function[0].pos, issues);
-        }
+            .for_each(|(label_decl, pos)|
+                self.add_explicit_decl_to_scope(label_decl, pos,
+                                                &mut local_scope,
+                                                (fn_name, function[0].pos),
+                                                function[0].pos, issues)
+            );
 
         let mut res = vec![];
         let mut scope_stack = vec![];
@@ -609,7 +607,7 @@ impl<'a> Analyzer<'a> {
         res
     }
 
-    pub(crate) fn run(&mut self, program: FlatAst, issues: &mut Vec<Issue>) -> ScopeTable {
+    pub(crate) fn run(&mut self, program: &[FlatNodeAndPos], issues: &mut Vec<Issue>) -> ScopeTable {
         self.set_global_scope(&program, issues);
         if !self.global_scope.get_mut().contains_key("main") {
             issues.push(Issue::NoMainFn)
@@ -617,15 +615,15 @@ impl<'a> Analyzer<'a> {
         let mut node_to_scope = vec![LocalScope::default(); program.len()];
         for rng in get_fns_ranges(program.iter()) {
             let local_scopes = self.validate_function(&program[rng.clone()], issues);
-            rng.clone().zip(local_scopes
-                .into_iter())
+            rng.zip(local_scopes.into_iter())
                 .for_each(|(idx, local_scope)| {
                     node_to_scope[idx] = local_scope
                 });
         }
         ScopeTable {
             global: self.global_scope.take(),
-            local: program.into_iter()
+            local: program.iter()
+                .cloned()
                 .zip(node_to_scope.into_iter())
                 .collect(),
         }
