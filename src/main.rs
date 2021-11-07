@@ -1,20 +1,19 @@
-use std::*;
-use process::exit;
-use fs;
 use io::Write;
+use process::exit;
+use std::*;
 
 use crate::config::*;
 
-mod tokenizer;
-mod parser;
 mod config;
 mod intermediate_code_generator;
 mod machine_code_generator;
+mod parser;
+mod tokenizer;
 
 fn write_to_file_and_exit(data: Vec<String>, file: &str) -> ! {
     let ok: Result<(), io::Error> = (|| {
         let mut file = fs::File::create(file)?;
-        file.write(data.join("\n").as_bytes())?;
+        file.write_all(data.join("\n").as_bytes())?;
         exit(0);
     })();
     if let Err(err) = ok {
@@ -49,7 +48,7 @@ fn parse_command_line_arguments() -> Result<(String, CompilerOptions, String), S
     let mut i: usize = 1;
     while i < args.len() {
         let curr = &args[i];
-        if !curr.starts_with("-") {
+        if !curr.starts_with('-') {
             if path.is_some() {
                 return Err("unknown option: ".to_owned() + curr);
             }
@@ -57,51 +56,51 @@ fn parse_command_line_arguments() -> Result<(String, CompilerOptions, String), S
             i += 1;
             continue;
         }
-        if curr.starts_with(out_pat) {
-            out_path = curr[out_pat.len()..].to_owned();
-        } else if curr.starts_with(ir_pat) {
+        if let Some(out) = curr.strip_prefix(out_pat) {
+            out_path = out.to_owned();
+        } else if curr == ir_pat {
             opts.mode = Mode::Ir;
         } else if curr.starts_with(enable_continue_pat) {
             opts.continue_is_enabled = true;
-        } else if curr.starts_with(heap_pat) {
-            let heap_size = curr[heap_pat.len()..].parse::<u64>();
+        } else if let Some(heap_sz) = curr.strip_prefix(heap_pat) {
+            let heap_size = heap_sz.parse::<u64>();
             if let Ok(heap_size) = heap_size {
                 opts.heap_size = heap_size;
             } else {
                 return Err("failed to parse heap size".to_owned());
             }
-        } else if curr.starts_with(stack_pat) {
-            let stack_size = curr[stack_pat.len()..].parse::<u64>();
+        } else if let Some(stack_sz) = curr.strip_prefix(stack_pat) {
+            let stack_size = stack_sz.parse::<u64>();
             if let Ok(stack_size) = stack_size {
                 opts.stack_size = stack_size;
             } else {
                 return Err("failed to parse stack size".to_owned());
             }
-        } else if curr.starts_with(platform_pat) {
-            let platform = curr[platform_pat.len()..].to_ascii_lowercase();
-            match platform.as_ref() {
-                "linux" => {
-                    opts.target_platform.platform_name = PlatformName::Linux;
-                }
-                "win" => {
-                    opts.target_platform.platform_name = PlatformName::Windows;
-                }
+        } else if let Some(platform) = curr.strip_prefix(platform_pat) {
+            let platform = platform.to_ascii_lowercase();
+            opts.target_platform.platform_name = match platform.as_ref() {
+                "linux" => PlatformName::Linux,
+                "win" => PlatformName::Windows,
                 _ => {
-                    unimplemented!("The platform {} you specified \
-                                    is either unknown or unsupported", platform)
+                    unimplemented!(
+                        "The platform {} you specified \
+                                    is either unknown or unsupported",
+                        platform
+                    )
                 }
-            }
-        } else if curr.starts_with(arch_pat) {
-            let arch = curr[arch_pat.len()..].to_ascii_lowercase();
-            match arch.as_ref() {
-                "x86-64" | "x64" | "x86_64" | "amd64" => {
-                    opts.target_platform.arch = Arch::x86_64;
-                }
+            };
+        } else if let Some(arch) = curr.strip_prefix(arch_pat) {
+            let arch = arch.to_ascii_lowercase();
+            opts.target_platform.arch = match arch.as_ref() {
+                "x86-64" | "x64" | "x86_64" | "amd64" => Arch::x86_64,
                 _ => {
-                    unimplemented!("The architecture {} you specified \
-                                    is either unknown or unsupported", arch)
+                    unimplemented!(
+                        "The architecture {} you specified \
+                                    is either unknown or unsupported",
+                        arch
+                    )
                 }
-            }
+            };
         } else {
             return Err("unknown option: ".to_owned() + curr);
         }
@@ -118,8 +117,8 @@ fn parse_command_line_arguments() -> Result<(String, CompilerOptions, String), S
 }
 
 fn main() {
-    let (filename, compiler_options, output_file) = parse_command_line_arguments()
-        .unwrap_or_else(|err| {
+    let (filename, compiler_options, output_file) =
+        parse_command_line_arguments().unwrap_or_else(|err| {
             eprintln!("Something went wrong parsing arguments: {}", err);
             process::exit(1);
         });
@@ -142,11 +141,10 @@ fn main() {
 
     let mut issues = vec![];
     let tokens = processor.run(&source_code, &mut issues);
-    let tokens = tokens.unwrap_or_else(
-        |err| {
-            eprintln!("Lexical analyzer returned an error: {}", err);
-            process::exit(1);
-        });
+    let tokens = tokens.unwrap_or_else(|err| {
+        eprintln!("Lexical analyzer returned an error: {}", err);
+        process::exit(1);
+    });
 
     let processor = parser::Parser {
         compiler_options,
@@ -157,14 +155,16 @@ fn main() {
     let mut at_least_1_error = false;
     for issue in issues {
         use Issue::*;
-        let error = match issue {
-            VecWithNoSizeAndIvals(..) | VecTooManyIvals { .. }
-            | DeclShadowsGlobalDef { .. } | UnnecessaryImport { .. }
-            | DeclShadowsFnParameter { .. } | DeclShadowsPrevious { .. }
-            | InvalidParameterCount { .. } => false,
-
-            _ => true,
-        };
+        let error = !matches!(
+            issue,
+            VecWithNoSizeAndIvals(..)
+                | VecTooManyIvals { .. }
+                | DeclShadowsGlobalDef { .. }
+                | UnnecessaryImport { .. }
+                | DeclShadowsFnParameter { .. }
+                | DeclShadowsPrevious { .. }
+                | InvalidParameterCount { .. }
+        );
         eprintln!("{}: {}", if error { "error" } else { "warning" }, issue);
         at_least_1_error |= error;
     }
@@ -174,18 +174,26 @@ fn main() {
     }
     let scope_table = ast_to_scopes_mapping.unwrap();
 
-    let mut processor
-        = intermediate_code_generator::IntermediateCodeGenerator::new(compiler_options,
-                                                                      &scope_table.global);
+    let mut processor = intermediate_code_generator::IntermediateCodeGenerator::new(
+        compiler_options,
+        &scope_table.global,
+    );
     let (intermediate_code, pooled_strings) = processor.run(&scope_table);
 
     if compiler_options.mode == Mode::Ir {
-        write_to_file_and_exit(intermediate_code.into_iter()
-                                   .map(|x| format!("{:?}", x)).collect(), &output_file)
+        write_to_file_and_exit(
+            intermediate_code
+                .into_iter()
+                .map(|x| format!("{:?}", x))
+                .collect(),
+            &output_file,
+        )
     }
-    let processor = machine_code_generator::MachineCodeGenerator::new(compiler_options,
-                                                                      &intermediate_code,
-                                                                      pooled_strings);
+    let processor = machine_code_generator::MachineCodeGenerator::new(
+        compiler_options,
+        &intermediate_code,
+        pooled_strings,
+    );
     let res = processor.run();
     write_to_file_and_exit(res, &output_file);
 }

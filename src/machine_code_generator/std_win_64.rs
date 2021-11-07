@@ -11,16 +11,16 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
     let stdin = internal_def("stdin");
     let stdout = internal_def("stdout");
     let proc_heap = internal_def("proc_heap");
-    let mut res = vec![];
+    let mut res = vec![executable_section_or_segment(TARGET).to_owned()];
 
-    res.push(executable_section_or_segment(TARGET).to_owned());
     for (name, info) in get_standard_library_names() {
         if let StdNameInfo::Variable { .. } = info {
             continue;
         }
         res.push(format!("{}:", internal_def(name)));
         res.push(match name {
-            "putchar" => format!(r"
+            "putchar" => format!(
+                r"
                     push r12
                     push r13
                     lea r12, [rsp + (2 + 2) * 8]
@@ -49,9 +49,12 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                     lea rsp, [rsp + 5 * 8]
                     pop r13
                     pop r12
-                    ret", stdout = stdout),
+                    ret",
+                stdout = stdout
+            ),
 
-            "getchar" => format!(r"
+            "getchar" => format!(
+                r"
                     lea rdx, [rsp + 8]
                     mov rcx, [{stdin}]
                     mov r8, 1
@@ -61,17 +64,22 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                     call [ReadFile]
                     lea rsp, [rsp + 5 * 8]
                     movzx rax, BYTE [rsp + 8]
-                    ret", stdin = stdin),
+                    ret",
+                stdin = stdin
+            ),
 
             "exit" => r"xor rcx, rcx
-                            jmp [ExitProcess]".to_owned(),
+                            jmp [ExitProcess]"
+                .to_owned(),
 
             "char" => r"
                     rol rdx, 3
                     movzx rax, BYTE [rdx + r8]
-                    ret".to_owned(),
+                    ret"
+            .to_owned(),
 
-            "getvec" => format!(r"
+            "getvec" => format!(
+                r"
                     inc rdx
                     mov r8, rdx
                     shl r8, 3
@@ -81,9 +89,12 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                     call [HeapAlloc]
                     lea rsp, [rsp + 5 * 8]
                     ror rax, 3
-                    ret", proc_heap),
+                    ret",
+                proc_heap
+            ),
 
-            "rlsevec" => format!(r"
+            "rlsevec" => format!(
+                r"
                     rol rdx, 3
                     mov r8, rdx
                     mov rcx, [{}]
@@ -91,9 +102,12 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                     lea rsp, [rsp - 5 * 8]
                     call [HeapFree]
                     lea rsp, [rsp + 5 * 8]
-                    ret", proc_heap),
+                    ret",
+                proc_heap
+            ),
 
-            "printf" => format!(r"
+            "printf" => format!(
+                r"
                     push r12
                     push r13
                     push r14
@@ -201,12 +215,15 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                         call {internal_putstr}
 
                     lea rsp, [rsp + (1+4) * 8]
-                    ret", MAX_LEN = 22,
-                                internal_putchar = internal_def("putchar"),
-                                print_unsigned = internal_def("print_unsigned"),
-                                internal_putstr = internal_def("putstr")),
+                    ret",
+                MAX_LEN = 22,
+                internal_putchar = internal_def("putchar"),
+                print_unsigned = internal_def("print_unsigned"),
+                internal_putstr = internal_def("putstr")
+            ),
 
-            "putstr" => format!(r"
+            "putstr" => format!(
+                r"
                     push r15
                     lea rsp, [rsp - 4 * 8]
                     mov r15, rdx
@@ -223,11 +240,16 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                     .out:
                         lea rsp, [rsp + 4 * 8]
                         pop r15
-                        ret", internal_putchar = internal_def("putchar")),
+                        ret",
+                internal_putchar = internal_def("putchar")
+            ),
 
             "nargs" => {
-                format!("mov rax, [{base} + (2+1)*8]
-                        ret", base = call_conv.reg_for_initial_rsp)
+                format!(
+                    "mov rax, [{base} + (2+1)*8]
+                        ret",
+                    base = call_conv.reg_for_initial_rsp
+                )
             }
 
             _ => "dq 0".to_owned(),
@@ -242,16 +264,20 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
     res.push(format!("{}:", START));
     res.push(MachineCodeGenerator::align_stack(call_conv.alignment));
     res.push("sub rsp, 4 * 8".to_owned());
-    res.extend(vec![
-        "mov rcx, -11",
-        "call [GetStdHandle]",
-        &format!("mov [{}], rax", internal_def("stdout")),
-        "mov rcx, -10",
-        "call [GetStdHandle]",
-        &format!("mov [{}], rax", internal_def("stdin")),
-        "call [GetProcessHeap]",
-        &format!("mov [{}], rax", internal_def("proc_heap")),
-    ].into_iter().map(String::from));
+    res.extend(
+        vec![
+            "mov rcx, -11",
+            "call [GetStdHandle]",
+            &format!("mov [{}], rax", internal_def("stdout")),
+            "mov rcx, -10",
+            "call [GetStdHandle]",
+            &format!("mov [{}], rax", internal_def("stdin")),
+            "call [GetProcessHeap]",
+            &format!("mov [{}], rax", internal_def("proc_heap")),
+        ]
+        .into_iter()
+        .map(String::from),
+    );
     res.push("xor rcx, rcx".to_owned());
     res.push(format!("call {}", mangle_global_def("main")));
     res.push(format!("jmp {}", mangle_global_def("exit")));

@@ -3,8 +3,8 @@ use std::*;
 use ast::*;
 use token::TokenPos;
 
-use crate::tokenizer::token;
 use crate::parser::ast;
+use crate::tokenizer::token;
 
 pub(crate) trait FlattenNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos>;
@@ -32,16 +32,23 @@ impl From<ast::Ival> for Ival {
             ast::Ival::Name(name, pos) => Ival {
                 value: NameOrConstant::Name(name),
                 pos,
-            }
+            },
         }
     }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum FlatDefinitionInfo {
-    Variable { ival: Option<Ival> },
-    Vector { specified_size: Option<ConstantNode>, ivals: Vec<Ival> },
-    Function { params: Vec<(String, TokenPos)> },
+    Variable {
+        ival: Option<Ival>,
+    },
+    Vector {
+        specified_size: Option<ConstantNode>,
+        ivals: Vec<Ival>,
+    },
+    Function {
+        params: Vec<(String, TokenPos)>,
+    },
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -52,7 +59,9 @@ pub(crate) struct FlatDefinition {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum FlatDeclarationNameInfo {
-    Auto { specified_size_if_vec: Option<ConstantNode> },
+    Auto {
+        specified_size_if_vec: Option<ConstantNode>,
+    },
     Extern,
     Label,
 }
@@ -89,7 +98,11 @@ pub(crate) struct FlatNodeAndPos {
 
 impl FlattenNode for ProgramNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
-        self.definitions.into_iter().map(|def| def.flatten_node()).flatten().collect()
+        self.definitions
+            .into_iter()
+            .map(|def| def.flatten_node())
+            .flatten()
+            .collect()
     }
 }
 
@@ -109,7 +122,7 @@ impl FlattenNode for VariableDefinitionNode {
             node: FlatNode::Def(FlatDefinition {
                 name: self.name,
                 info: FlatDefinitionInfo::Variable {
-                    ival: self.initial_value.map(Ival::from)
+                    ival: self.initial_value.map(Ival::from),
                 },
             }),
             pos: self.position,
@@ -124,10 +137,7 @@ impl FlattenNode for VectorDefinitionNode {
                 name: self.name,
                 info: FlatDefinitionInfo::Vector {
                     specified_size: self.specified_size,
-                    ivals: self.initial_values
-                        .into_iter()
-                        .map(|ival| Ival::from(ival))
-                        .collect(),
+                    ivals: self.initial_values.into_iter().map(Ival::from).collect(),
                 },
             }),
             pos: self.position,
@@ -140,7 +150,9 @@ impl FlattenNode for FunctionDefinitionNode {
         let mut res = vec![FlatNodeAndPos {
             node: FlatNode::Def(FlatDefinition {
                 name: self.name,
-                info: FlatDefinitionInfo::Function { params: self.parameters },
+                info: FlatDefinitionInfo::Function {
+                    params: self.parameters,
+                },
             }),
             pos: self.position,
         }];
@@ -153,35 +165,32 @@ impl FlattenNode for StatementNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
         let append_end_marker = {
             use Statement::*;
-            if let Compound(_) | Switch(_) | If(_) | While(_) = self.statement.as_ref() {
-                true
-            } else {
-                false
-            }
+            matches!(
+                self.statement.as_ref(),
+                Compound(_) | Switch(_) | If(_) | While(_)
+            )
         };
         let mut res = match *self.statement {
-            Statement::NullStatement => vec![],
+            Statement::Null => vec![],
             Statement::Compound(comp_stmt) => comp_stmt.flatten_node(),
             Statement::Declaration(decl) => decl.flatten_node(),
 
             Statement::Return(ret) => {
                 vec![FlatNodeAndPos {
                     pos: self.position,
-                    node: FlatNode::Return(
-                        if let Some(rv) = ret.rvalue {
-                            Some(*rv.rvalue)
-                        } else {
-                            None
-                        }),
+                    node: FlatNode::Return(if let Some(rv) = ret.rvalue {
+                        Some(*rv.rvalue)
+                    } else {
+                        None
+                    }),
                 }]
             }
 
             Statement::Switch(sw) => {
-                let mut res = vec![
-                    FlatNodeAndPos {
-                        node: FlatNode::Switch(*sw.rvalue.rvalue),
-                        pos: self.position,
-                    }];
+                let mut res = vec![FlatNodeAndPos {
+                    node: FlatNode::Switch(*sw.rvalue.rvalue),
+                    pos: self.position,
+                }];
                 res.extend(sw.body.flatten_node());
                 res
             }
@@ -196,11 +205,10 @@ impl FlattenNode for StatementNode {
             }
 
             Statement::If(r#if) => {
-                let mut res = vec![
-                    FlatNodeAndPos {
-                        node: FlatNode::If(*r#if.condition.rvalue),
-                        pos: self.position,
-                    }];
+                let mut res = vec![FlatNodeAndPos {
+                    node: FlatNode::If(*r#if.condition.rvalue),
+                    pos: self.position,
+                }];
                 res.extend(r#if.body.flatten_node());
 
                 if let Some(else_node) = r#if.r#else {
@@ -214,11 +222,10 @@ impl FlattenNode for StatementNode {
             }
 
             Statement::While(wh) => {
-                let mut res = vec![
-                    FlatNodeAndPos {
-                        node: FlatNode::While(*wh.condition.rvalue),
-                        pos: self.position,
-                    }];
+                let mut res = vec![FlatNodeAndPos {
+                    node: FlatNode::While(*wh.condition.rvalue),
+                    pos: self.position,
+                }];
                 res.extend(wh.body.flatten_node());
                 res
             }
@@ -232,17 +239,25 @@ impl FlattenNode for StatementNode {
             Statement::RvalueAndSemicolon(rv) => rv.flatten_node(),
 
             Statement::Break(_br) => {
-                vec![FlatNodeAndPos { node: FlatNode::Break, pos: self.position }]
+                vec![FlatNodeAndPos {
+                    node: FlatNode::Break,
+                    pos: self.position,
+                }]
             }
 
             Statement::Continue(_cn) => {
-                vec![FlatNodeAndPos { node: FlatNode::Continue, pos: self.position }]
+                vec![FlatNodeAndPos {
+                    node: FlatNode::Continue,
+                    pos: self.position,
+                }]
             }
         };
 
         if append_end_marker {
             res.push(FlatNodeAndPos {
-                node: FlatNode::EndOfStmt { positions_away: res.len() },
+                node: FlatNode::EndOfStmt {
+                    positions_away: res.len(),
+                },
                 pos: res.last().unwrap().pos,
             })
         }
@@ -252,8 +267,12 @@ impl FlattenNode for StatementNode {
 
 impl FlattenNode for CompoundStatementNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
-        let mut res = vec![FlatNodeAndPos { node: FlatNode::Compound, pos: self.position }];
-        let body: Vec<FlatNodeAndPos> = self.statement_list
+        let mut res = vec![FlatNodeAndPos {
+            node: FlatNode::Compound,
+            pos: self.position,
+        }];
+        let body: Vec<FlatNodeAndPos> = self
+            .statement_list
             .into_iter()
             .map(|stmt| stmt.flatten_node())
             .flatten()
@@ -267,16 +286,17 @@ impl FlattenNode for CompoundStatementNode {
 impl FlattenNode for DeclarationNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
         match self {
-            DeclarationNode::AutoDeclaration(auto_decl) => auto_decl.flatten_node(),
-            DeclarationNode::ExternDeclaration(extern_decl) => extern_decl.flatten_node(),
-            DeclarationNode::LabelDeclaration(label_decl) => label_decl.flatten_node(),
+            DeclarationNode::Auto(auto_decl) => auto_decl.flatten_node(),
+            DeclarationNode::Extern(extern_decl) => extern_decl.flatten_node(),
+            DeclarationNode::Label(label_decl) => label_decl.flatten_node(),
         }
     }
 }
 
 impl FlattenNode for AutoDeclarationNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
-        let mut res = self.declarations
+        let mut res = self
+            .declarations
             .into_iter()
             .map(|auto_decl| auto_decl.flatten_node())
             .flatten()
@@ -289,11 +309,12 @@ impl FlattenNode for AutoDeclarationNode {
 impl FlattenNode for AutoDeclaration {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
         vec![FlatNodeAndPos {
-            node: FlatNode::Decl(
-                FlatDeclaration {
-                    info: FlatDeclarationNameInfo::Auto { specified_size_if_vec: self.size_if_vector },
-                    name: self.name,
-                }),
+            node: FlatNode::Decl(FlatDeclaration {
+                info: FlatDeclarationNameInfo::Auto {
+                    specified_size_if_vec: self.size_if_vector,
+                },
+                name: self.name,
+            }),
             pos: self.position,
         }]
     }
@@ -301,14 +322,14 @@ impl FlattenNode for AutoDeclaration {
 
 impl FlattenNode for ExternDeclarationNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
-        let mut res = self.names
+        let mut res = self
+            .names
             .into_iter()
             .map(|(name, pos)| FlatNodeAndPos {
-                node: FlatNode::Decl(
-                    FlatDeclaration {
-                        name,
-                        info: FlatDeclarationNameInfo::Extern,
-                    }),
+                node: FlatNode::Decl(FlatDeclaration {
+                    name,
+                    info: FlatDeclarationNameInfo::Extern,
+                }),
                 pos,
             })
             .collect::<Vec<FlatNodeAndPos>>();

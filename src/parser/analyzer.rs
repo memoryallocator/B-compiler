@@ -1,16 +1,15 @@
-use std::*;
+use cell::Cell;
 use collections::HashMap;
 use ops::Range;
-use convert::TryInto;
-use cell::Cell;
+use std::*;
 
 use crate::tokenizer::token;
-use token::{TokenPos, Constant};
+use token::{Constant, TokenPos};
 
 use crate::config::*;
 use crate::parser;
-use parser::ast::flat_ast::*;
 use parser::ast;
+use parser::ast::flat_ast::*;
 
 #[derive(Debug, Clone)]
 pub(crate) enum ProcessedDeclInfo {
@@ -63,7 +62,9 @@ pub(crate) struct Analyzer<'a> {
 type FunctionNodesIndexesRanges = Vec<Range<usize>>;
 
 pub(crate) fn get_fns_ranges<'a, I: ExactSizeIterator>(program: I) -> FunctionNodesIndexesRanges
-    where I: Iterator<Item=&'a FlatNodeAndPos> {
+where
+    I: Iterator<Item = &'a FlatNodeAndPos>,
+{
     let mut res = vec![];
     let mut fn_begins_at = None;
 
@@ -81,7 +82,8 @@ pub(crate) fn get_fns_ranges<'a, I: ExactSizeIterator>(program: I) -> FunctionNo
             }
         }
     }
-    if let Some(fn_begins_at) = fn_begins_at {  // the last fn, if there was at least one
+    if let Some(fn_begins_at) = fn_begins_at {
+        // the last fn, if there was at least one
         res.push(fn_begins_at..len);
     }
     res
@@ -115,7 +117,9 @@ impl<'a> Analyzer<'a> {
         let explicit_decl_type;
         let decl_info;
         match &decl.info {
-            FlatDeclarationNameInfo::Auto { specified_size_if_vec: size_if_vec } => {
+            FlatDeclarationNameInfo::Auto {
+                specified_size_if_vec: size_if_vec,
+            } => {
                 explicit_decl_type = ExplicitDeclType::Auto;
                 decl_info = ProcessedDeclInfo::Auto {
                     size_if_vec: {
@@ -134,12 +138,15 @@ impl<'a> Analyzer<'a> {
                         } else {
                             None
                         }
-                    }
+                    },
                 }
             }
             FlatDeclarationNameInfo::Extern => {
                 if global_def.is_none() {
-                    issues.push(ExternSymbolNotFound { name: name.clone(), extern_pos: pos });
+                    issues.push(ExternSymbolNotFound {
+                        name: name.clone(),
+                        extern_pos: pos,
+                    });
                     return;
                 }
                 explicit_decl_type = ExplicitDeclType::Extern;
@@ -150,7 +157,10 @@ impl<'a> Analyzer<'a> {
                 decl_info = ProcessedDeclInfo::Label;
             }
         };
-        let decl_info_and_pos = DeclInfoAndPos { pos, info: decl_info };
+        let decl_info_and_pos = DeclInfoAndPos {
+            pos,
+            info: decl_info,
+        };
 
         if let Some(global_def) = global_def {
             if let ExplicitDeclType::Auto | ExplicitDeclType::Label = explicit_decl_type {
@@ -186,39 +196,40 @@ impl<'a> Analyzer<'a> {
                         })
                     }
                 }
-                ProcessedDeclInfo::Label => {
-                    issues.push(NameRedeclared {
-                        decl: (name.clone(), decl_info_and_pos),
-                        prev_decl,
-                    })
-                }
-                ProcessedDeclInfo::FnParameter { .. } => {
-                    issues.push(DeclShadowsFnParameter {
-                        param_pos: decl_info_and_pos.pos,
-                        decl: (name.clone(), decl_info_and_pos),
-                        fn_def: (curr_fn.0.to_string(), curr_fn.1),
-                    })
-                }
+                ProcessedDeclInfo::Label => issues.push(NameRedeclared {
+                    decl: (name.clone(), decl_info_and_pos),
+                    prev_decl,
+                }),
+                ProcessedDeclInfo::FnParameter { .. } => issues.push(DeclShadowsFnParameter {
+                    param_pos: decl_info_and_pos.pos,
+                    decl: (name.clone(), decl_info_and_pos),
+                    fn_def: (curr_fn.0.to_string(), curr_fn.1),
+                }),
             }
         }
     }
 
     fn set_global_scope(&mut self, program: &[FlatNodeAndPos], issues: &mut Vec<Issue>) {
         let mut names_needed_for_init = HashMap::<&str, TokenPos>::new();
-        let standard_scope = Cell::new(get_standard_library_names()
-            .into_iter()
-            .map(|(name, info)|
-                (name.to_string(),
-                 DefInfoAndPos {
-                     pos_if_user_defined: None,
-                     info: match info {
-                         StdNameInfo::Variable { ival } =>
-                             DefInfo::Variable(VarDefInfo::StdVar { ival }),
-                         StdNameInfo::Function(fn_def) => DefInfo::Function(fn_def)
-                     },
-                 }
-                ))
-            .collect());
+        let standard_scope = Cell::new(
+            get_standard_library_names()
+                .into_iter()
+                .map(|(name, info)| {
+                    (
+                        name.to_string(),
+                        DefInfoAndPos {
+                            pos_if_user_defined: None,
+                            info: match info {
+                                StdNameInfo::Variable { ival } => {
+                                    DefInfo::Variable(VarDefInfo::StdVar { ival })
+                                }
+                                StdNameInfo::Function(fn_def) => DefInfo::Function(fn_def),
+                            },
+                        },
+                    )
+                })
+                .collect(),
+        );
         self.global_scope = standard_scope;
 
         for node in program.iter() {
@@ -228,17 +239,22 @@ impl<'a> Analyzer<'a> {
                 let curr_def = (name.clone(), pos);
                 let info = match &def.info {
                     FlatDefinitionInfo::Variable { ival } => {
-                        if let Some(
-                            Ival { pos: ival_pos, value: NameOrConstant::Name(init_name) }
-                        ) = ival {
-                            if !names_needed_for_init.contains_key(&init_name as &str) {
-                                names_needed_for_init.insert(init_name, ival_pos.clone());
+                        if let Some(Ival {
+                            pos: ival_pos,
+                            value: NameOrConstant::Name(init_name),
+                        }) = ival
+                        {
+                            if !names_needed_for_init.contains_key(init_name as &str) {
+                                names_needed_for_init.insert(init_name, *ival_pos);
                             }
                         }
                         DefInfo::Variable(VarDefInfo::UserVar { ival: ival.clone() })
                     }
 
-                    FlatDefinitionInfo::Vector { ivals, specified_size } => {
+                    FlatDefinitionInfo::Vector {
+                        ivals,
+                        specified_size,
+                    } => {
                         for ival in ivals {
                             if let NameOrConstant::Name(init_name) = &ival.value {
                                 if !names_needed_for_init.contains_key(init_name as &str) {
@@ -248,55 +264,52 @@ impl<'a> Analyzer<'a> {
                         }
                         let ivals_len = ivals.len();
 
-                        let specified_size =
-                            if let Some(specified_size) = specified_size {
-                                let s = &specified_size.constant;
-                                match s {
-                                    Constant::Number(nmb) => Some(nmb),
-                                    Constant::String(..) => {
-                                        issues.push(Issue::VecSizeIsNotANumber {
-                                            name: name.clone(),
-                                            pos,
-                                        });
-                                        None
-                                    }
+                        let specified_size = if let Some(specified_size) = specified_size {
+                            let s = &specified_size.constant;
+                            match s {
+                                Constant::Number(nmb) => Some(nmb),
+                                Constant::String(..) => {
+                                    issues.push(Issue::VecSizeIsNotANumber {
+                                        name: name.clone(),
+                                        pos,
+                                    });
+                                    None
                                 }
-                            } else {
-                                None
-                            };
+                            }
+                        } else {
+                            None
+                        };
 
-                        let actual_size =
-                            if let Some(specified_size) = specified_size {
-                                let specified_size_plus_1 = (1 + specified_size)
-                                    .try_into()
-                                    .unwrap();
-                                if ivals_len > specified_size_plus_1 {
-                                    issues.push(Issue::VecTooManyIvals {
-                                        vec_def: (name.clone(), pos),
-                                        ivals_len,
-                                        specified_size_plus_1,
-                                    })
-                                }
-                                cmp::max(ivals_len, specified_size_plus_1)
-                            } else {
-                                if ivals_len == 0 {
-                                    issues.push(Issue::VecWithNoSizeAndIvals(name.clone(), pos));
-                                }
-                                cmp::max(ivals_len, 1)
-                            };
+                        let actual_size = if let Some(specified_size) = specified_size {
+                            let specified_size_plus_1 = (1 + specified_size).try_into().unwrap();
+                            if ivals_len > specified_size_plus_1 {
+                                issues.push(Issue::VecTooManyIvals {
+                                    vec_def: (name.clone(), pos),
+                                    ivals_len,
+                                    specified_size_plus_1,
+                                })
+                            }
+                            cmp::max(ivals_len, specified_size_plus_1)
+                        } else {
+                            if ivals_len == 0 {
+                                issues.push(Issue::VecWithNoSizeAndIvals(name.clone(), pos));
+                            }
+                            cmp::max(ivals_len, 1)
+                        };
                         DefInfo::Vector {
                             size: actual_size.try_into().unwrap(),
                             ivals: ivals.clone(),
                         }
                     }
 
-                    FlatDefinitionInfo::Function { params } => {
-                        DefInfo::Function(FnDef {
-                            num_of_params: NumberOfParameters::Exact(params.len()),
-                        })
-                    }
+                    FlatDefinitionInfo::Function { params } => DefInfo::Function(FnDef {
+                        num_of_params: NumberOfParameters::Exact(params.len()),
+                    }),
                 };
-                let info = DefInfoAndPos { pos_if_user_defined: Some(pos), info };
+                let info = DefInfoAndPos {
+                    pos_if_user_defined: Some(pos),
+                    info,
+                };
                 if let Some(prev_def) = self.global_scope.get_mut().insert(name.clone(), info) {
                     issues.push(Issue::NameRedefined { curr_def, prev_def })
                 }
@@ -305,7 +318,10 @@ impl<'a> Analyzer<'a> {
 
         for (name, pos) in names_needed_for_init {
             if !self.global_scope.get_mut().contains_key(name) {
-                issues.push(Issue::NameNotDefined { name: name.to_string(), pos })
+                issues.push(Issue::NameNotDefined {
+                    name: name.to_string(),
+                    pos,
+                })
             }
         }
     }
@@ -343,98 +359,90 @@ impl<'a> Analyzer<'a> {
         local_scope: &mut LocalScope,
         issues: &mut Vec<Issue>,
     ) {
-        use ast::*;
         use ast::Rvalue::*;
+        use ast::*;
 
-        let rvalues_to_process =
-            match rv {
-                Constant(_) => vec![],
-                Lvalue(lv) => {
-                    self.process_lvalue(&lv, local_scope, issues)
-                }
-                Assign { lhs, rhs, .. } => {
-                    let mut rvs_to_pr = self.process_lvalue(&lhs, local_scope, issues);
-                    rvs_to_pr.push(rhs);
-                    rvs_to_pr
-                }
-                IncDec(node) => {
-                    self.process_lvalue(&node.lvalue, local_scope, issues)
-                }
+        let rvalues_to_process = match rv {
+            Constant(_) => vec![],
+            Lvalue(lv) => self.process_lvalue(lv, local_scope, issues),
+            Assign { lhs, rhs, .. } => {
+                let mut rvs_to_pr = self.process_lvalue(lhs, local_scope, issues);
+                rvs_to_pr.push(rhs);
+                rvs_to_pr
+            }
+            IncDec(node) => self.process_lvalue(&node.lvalue, local_scope, issues),
 
-                Unary(_, rv) => vec![rv],
-                TakeAddress(lv) => {
-                    self.process_lvalue(&lv, local_scope, issues)
-                }
-                Binary { lhs, rhs, .. } => vec![lhs, rhs],
-                ConditionalExpression { condition, on_true, on_false, .. } => {
-                    vec![condition, on_true, on_false]
-                }
+            Unary(_, rv) => vec![rv],
+            TakeAddress(lv) => self.process_lvalue(lv, local_scope, issues),
+            Binary { lhs, rhs, .. } => vec![lhs, rhs],
+            ConditionalExpression {
+                condition,
+                on_true,
+                on_false,
+                ..
+            } => {
+                vec![condition, on_true, on_false]
+            }
 
-                BracketedExpression(expr) => vec![expr],
-                FunctionCall(fn_call) => {
-                    let mut rvalue_to_process = vec![];
-                    if let Rvalue::Lvalue(
-                        LvalueNode {
-                            position,
-                            lvalue: ast::Lvalue::Name(name),
-                        }
-                    ) = &*fn_call.fn_name.rvalue {
-                        let global_name_info = self.global_scope.get_mut().get(name);
-                        if !local_scope.contains_key(name) {
-                            if let Some(global_name_info) = global_name_info {
-                                local_scope.insert(
-                                    name.clone(),
-                                    DeclInfoAndPos {
-                                        pos: *position,
-                                        info: ProcessedDeclInfo::AssumedExternFnCall(
-                                            global_name_info.clone()),
-                                    });
-                            } else {
-                                issues.push(Issue::NameNotDefined {
-                                    name: name.clone(),
+            BracketedExpression(expr) => vec![expr],
+            FunctionCall(fn_call) => {
+                let mut rvalue_to_process = vec![];
+                if let Rvalue::Lvalue(LvalueNode {
+                    position,
+                    lvalue: ast::Lvalue::Name(name),
+                }) = &*fn_call.fn_name.rvalue
+                {
+                    let global_name_info = self.global_scope.get_mut().get(name);
+                    if !local_scope.contains_key(name) {
+                        if let Some(global_name_info) = global_name_info {
+                            local_scope.insert(
+                                name.clone(),
+                                DeclInfoAndPos {
                                     pos: *position,
-                                })
-                            }
+                                    info: ProcessedDeclInfo::AssumedExternFnCall(
+                                        global_name_info.clone(),
+                                    ),
+                                },
+                            );
+                        } else {
+                            issues.push(Issue::NameNotDefined {
+                                name: name.clone(),
+                                pos: *position,
+                            })
                         }
-                        if let Some(
-                            DeclInfoAndPos { info, .. }
-                        ) = local_scope.get(name) {
-                            if let ProcessedDeclInfo::AssumedExternFnCall(def)
-                            | ProcessedDeclInfo::ExplicitExtern(def) = info {
-                                if let DefInfoAndPos {
-                                    info: DefInfo::Function(FnDef { num_of_params, .. }), ..
-                                } = def {
-                                    let actual_param_count = fn_call.arguments.len();
-                                    let fn_pos = position;
-                                    let invalid_param_count =
-                                        match num_of_params {
-                                            NumberOfParameters::Exact(n) => {
-                                                actual_param_count != *n
-                                            }
-                                            NumberOfParameters::AtLeast(n) => {
-                                                actual_param_count < *n
-                                            }
-                                        };
-                                    if invalid_param_count {
-                                        issues.push(Issue::InvalidParameterCount {
-                                            expected: *num_of_params,
-                                            actual: actual_param_count,
-                                            pos: *fn_pos,
-                                        })
-                                    }
+                    }
+                    if let Some(DeclInfoAndPos { info, .. }) = local_scope.get(name) {
+                        if let ProcessedDeclInfo::AssumedExternFnCall(def)
+                        | ProcessedDeclInfo::ExplicitExtern(def) = info
+                        {
+                            if let DefInfoAndPos {
+                                info: DefInfo::Function(FnDef { num_of_params, .. }),
+                                ..
+                            } = def
+                            {
+                                let actual_param_count = fn_call.arguments.len();
+                                let fn_pos = position;
+                                let invalid_param_count = match num_of_params {
+                                    NumberOfParameters::Exact(n) => actual_param_count != *n,
+                                    NumberOfParameters::AtLeast(n) => actual_param_count < *n,
+                                };
+                                if invalid_param_count {
+                                    issues.push(Issue::InvalidParameterCount {
+                                        expected: *num_of_params,
+                                        actual: actual_param_count,
+                                        pos: *fn_pos,
+                                    })
                                 }
                             }
                         }
-                    } else {
-                        rvalue_to_process.push(&fn_call.fn_name)
                     }
-                    rvalue_to_process.append(
-                        &mut fn_call.arguments
-                            .iter()
-                            .collect());
-                    rvalue_to_process
+                } else {
+                    rvalue_to_process.push(&fn_call.fn_name)
                 }
-            };
+                rvalue_to_process.append(&mut fn_call.arguments.iter().collect());
+                rvalue_to_process
+            }
+        };
         for x in rvalues_to_process {
             self.process_rvalue(&x.rvalue, local_scope, issues)
         }
@@ -445,36 +453,45 @@ impl<'a> Analyzer<'a> {
         function: &[FlatNodeAndPos],
         issues: &mut Vec<Issue>,
     ) -> Vec<LocalScope> {
-        let fn_name =
-            if let FlatNode::Def(
-                FlatDefinition {
-                    name,
-                    info: FlatDefinitionInfo::Function { .. }
-                }
-            ) = &function[0].node {
-                name.as_str()
-            } else {
-                unreachable!()
-            };
+        let fn_name = if let FlatNode::Def(FlatDefinition {
+            name,
+            info: FlatDefinitionInfo::Function { .. },
+        }) = &function[0].node
+        {
+            name.as_str()
+        } else {
+            unreachable!()
+        };
         let fn_starts_at = function[0].pos;
 
         let mut local_scope = LocalScope::new();
         function
             .iter()
-            .filter_map(|node|
+            .filter_map(|node| {
                 if let FlatNode::Decl(
-                    decl @ FlatDeclaration { info: FlatDeclarationNameInfo::Label, .. }
-                ) = &node.node {
+                    decl
+                    @
+                    FlatDeclaration {
+                        info: FlatDeclarationNameInfo::Label,
+                        ..
+                    },
+                ) = &node.node
+                {
                     Some((decl, node.pos))
                 } else {
                     None
-                })
-            .for_each(|(label_decl, pos)|
-                self.add_explicit_decl_to_scope(label_decl, pos,
-                                                &mut local_scope,
-                                                (fn_name, function[0].pos),
-                                                function[0].pos, issues)
-            );
+                }
+            })
+            .for_each(|(label_decl, pos)| {
+                self.add_explicit_decl_to_scope(
+                    label_decl,
+                    pos,
+                    &mut local_scope,
+                    (fn_name, function[0].pos),
+                    function[0].pos,
+                    issues,
+                )
+            });
 
         let mut res = vec![];
         let mut scope_stack = vec![];
@@ -513,7 +530,7 @@ impl<'a> Analyzer<'a> {
                                 let last_while = while_stmt_stack.pop();
                                 debug_assert!(last_while.is_some());
                             }
-                            _ => ()
+                            _ => (),
                         }
                         breakable_stmt_stack.pop();
                     } else if let FlatNode::Compound = restore_because_this_stmt_ended.node {
@@ -524,17 +541,17 @@ impl<'a> Analyzer<'a> {
                     }
                 }
 
-                FlatNode::Decl(decl) => {
-                    match decl.info {
-                        FlatDeclarationNameInfo::Label => (),
-                        _ => {
-                            self.add_explicit_decl_to_scope(decl, node.pos,
-                                                            local_scope,
-                                                            (fn_name, fn_starts_at),
-                                                            block_starts_at, issues)
-                        }
-                    }
-                }
+                FlatNode::Decl(decl) => match decl.info {
+                    FlatDeclarationNameInfo::Label => (),
+                    _ => self.add_explicit_decl_to_scope(
+                        decl,
+                        node.pos,
+                        local_scope,
+                        (fn_name, fn_starts_at),
+                        block_starts_at,
+                        issues,
+                    ),
+                },
                 FlatNode::Compound => {
                     compound_stack.push(node.pos);
                     scope_stack.push(local_scope.clone())
@@ -566,7 +583,10 @@ impl<'a> Analyzer<'a> {
                         };
                         let prev = cases.insert(case_const.0, case_const.1);
                         if let Some(prev) = prev {
-                            issues.push(Issue::CaseEncounteredTwice { curr: case_const.1, prev })
+                            issues.push(Issue::CaseEncounteredTwice {
+                                curr: case_const.1,
+                                prev,
+                            })
                         }
                     } else {
                         issues.push(Issue::UnexpectedKeyword(node.pos))
@@ -577,16 +597,15 @@ impl<'a> Analyzer<'a> {
                         self.process_rvalue(val, local_scope, issues);
                     }
                 }
-                FlatNode::Def(
-                    FlatDefinition {
-                        info: FlatDefinitionInfo::Function { params }, ..
-                    }
-                ) => {
+                FlatNode::Def(FlatDefinition {
+                    info: FlatDefinitionInfo::Function { params },
+                    ..
+                }) => {
                     for (i, (param_name, param_pos)) in params.iter().enumerate() {
                         let decl = DeclInfoAndPos {
                             pos: *param_pos,
                             info: ProcessedDeclInfo::FnParameter {
-                                param_no: i.try_into().unwrap()
+                                param_no: i.try_into().unwrap(),
                             },
                         };
                         local_scope.insert(param_name.clone(), decl.clone());
@@ -599,7 +618,7 @@ impl<'a> Analyzer<'a> {
                         }
                     }
                 }
-                _ => unreachable!()
+                _ => unreachable!(),
             }
             debug_assert!(i == res.len());
             res.push(local_scope.clone());
@@ -607,8 +626,12 @@ impl<'a> Analyzer<'a> {
         res
     }
 
-    pub(crate) fn run(&mut self, program: &[FlatNodeAndPos], issues: &mut Vec<Issue>) -> ScopeTable {
-        self.set_global_scope(&program, issues);
+    pub(crate) fn run(
+        &mut self,
+        program: &[FlatNodeAndPos],
+        issues: &mut Vec<Issue>,
+    ) -> ScopeTable {
+        self.set_global_scope(program, issues);
         if !self.global_scope.get_mut().contains_key("main") {
             issues.push(Issue::NoMainFn)
         }
@@ -616,13 +639,12 @@ impl<'a> Analyzer<'a> {
         for rng in get_fns_ranges(program.iter()) {
             let local_scopes = self.validate_function(&program[rng.clone()], issues);
             rng.zip(local_scopes.into_iter())
-                .for_each(|(idx, local_scope)| {
-                    node_to_scope[idx] = local_scope
-                });
+                .for_each(|(idx, local_scope)| node_to_scope[idx] = local_scope);
         }
         ScopeTable {
             global: self.global_scope.take(),
-            local: program.iter()
+            local: program
+                .iter()
                 .cloned()
                 .zip(node_to_scope.into_iter())
                 .collect(),

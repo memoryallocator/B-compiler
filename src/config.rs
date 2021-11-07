@@ -1,10 +1,10 @@
-use std::*;
 use collections::{HashMap, HashSet};
 use fmt::{Display, Formatter};
+use std::*;
 
+use crate::parser::{DeclInfoAndPos, DefInfoAndPos};
 use crate::tokenizer::token;
 use token::*;
-use crate::parser::{DefInfoAndPos, DeclInfoAndPos};
 
 pub(crate) enum Issue {
     BracketNotOpened(TokenPos),
@@ -19,12 +19,18 @@ pub(crate) enum Issue {
     EmptyBracketedExpr(TokenPos),
     WrongConstant(TokenPos),
     ExpectedPrimaryExpr(TokenPos),
-    OpCannotBeApplied { op_pos: TokenPos, expr_pos: Option<TokenPos> },
+    OpCannotBeApplied {
+        op_pos: TokenPos,
+        expr_pos: Option<TokenPos>,
+    },
     UnexpectedOperand(TokenPos),
     NoOperandForOperator(Operator, TokenPos, Option<LeftOrRight>),
     NoCondition(TokenPos),
     NoColonInCond(TokenPos),
-    NameNotDefined { name: String, pos: TokenPos },
+    NameNotDefined {
+        name: String,
+        pos: TokenPos,
+    },
     NameRedefined {
         curr_def: (String, TokenPos),
         prev_def: DefInfoAndPos,
@@ -34,7 +40,10 @@ pub(crate) enum Issue {
         prev_decl: DeclInfoAndPos,
     },
     VecWithNoSizeAndIvals(String, TokenPos),
-    VecSizeIsNotANumber { name: String, pos: TokenPos },
+    VecSizeIsNotANumber {
+        name: String,
+        pos: TokenPos,
+    },
     VecTooManyIvals {
         vec_def: (String, TokenPos),
         ivals_len: usize,
@@ -62,7 +71,10 @@ pub(crate) enum Issue {
         prev_decl: DeclInfoAndPos,
     },
     UnexpectedKeyword(TokenPos),
-    CaseEncounteredTwice { curr: TokenPos, prev: TokenPos },
+    CaseEncounteredTwice {
+        curr: TokenPos,
+        prev: TokenPos,
+    },
     LiteralTooLong(TokenPos),
     NoMainFn,
     InvalidParameterCount {
@@ -83,43 +95,64 @@ fn def_pos_to_string(def_pos: &Option<TokenPos>) -> String {
 impl Display for Issue {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use Issue::*;
-        write!(f, "{}", match self {
+        let msg = match self {
             ParsingError(pos) => {
                 format!("{}: failed to parse", pos)
             }
 
             NameRedefined {
                 curr_def: (name, pos),
-                prev_def: DefInfoAndPos { pos_if_user_defined, .. }
+                prev_def:
+                    DefInfoAndPos {
+                        pos_if_user_defined,
+                        ..
+                    },
             } => {
-                format!("name {}, defined at {}, was already defined {}",
-                        name, pos,
-                        def_pos_to_string(pos_if_user_defined))
+                format!(
+                    "name {}, defined at {}, was already defined {}",
+                    name,
+                    pos,
+                    def_pos_to_string(pos_if_user_defined)
+                )
             }
 
             VecSizeIsNotANumber { name, pos } => {
-                format!("size of vector {}, defined at {}, is not a number", name, pos)
+                format!(
+                    "size of vector {}, defined at {}, is not a number",
+                    name, pos
+                )
             }
 
-            DeclShadowsGlobalDef { decl: (name, info), global_def } => {
-                format!("declaration of name {} at {} shadows global definition {}",
-                        name, info.pos, def_pos_to_string(&global_def.pos_if_user_defined))
+            DeclShadowsGlobalDef {
+                decl: (name, info),
+                global_def,
+            } => {
+                format!(
+                    "declaration of name {} at {} shadows global definition {}",
+                    name,
+                    info.pos,
+                    def_pos_to_string(&global_def.pos_if_user_defined)
+                )
             }
 
             BracketNotOpened(pos) => {
-                format!("there is a closing bracket at {}, but there is no opening bracket", pos)
+                format!(
+                    "there is a closing bracket at {}, but there is no opening bracket",
+                    pos
+                )
             }
 
             BracketNotClosed(pos) => {
-                format!("there is an opening bracket at {}, but there is no closing bracket", pos)
+                format!(
+                    "there is an opening bracket at {}, but there is no closing bracket",
+                    pos
+                )
             }
 
-            EmptyTokenStream => {
-                "failed to recognize a single token".to_owned()
-            }
+            EmptyTokenStream => "failed to recognize a single token".to_owned(),
 
             FailedToParseExact(pos) => {
-                format!("failed to parse a construct at {}", pos)
+                format!("failed to parse construct at {}", pos)
             }
 
             UnexpectedToken(pos) => {
@@ -164,12 +197,16 @@ impl Display for Issue {
             }
 
             NoOperandForOperator(op, op_pos, left_or_right) => {
-                format!("{}: no {} operand for operator {}", op_pos,
-                        if let Some(left_or_right) = left_or_right {
-                            format!("{}", left_or_right)
-                        } else {
-                            "".to_string()
-                        }, op)
+                format!(
+                    "{}: no {}operand for operator {}",
+                    op_pos,
+                    if let Some(left_or_right) = left_or_right {
+                        format!("{} ", left_or_right)
+                    } else {
+                        "".to_string()
+                    },
+                    op
+                )
             }
 
             NoCondition(pos) => {
@@ -184,18 +221,29 @@ impl Display for Issue {
                 format!("{}: name {} is not defined", pos, name)
             }
 
-            NameRedeclared { decl: (name, decl), prev_decl } => {
-                format!("name {}, declared at {}, is redeclared at {}",
-                        name, decl.pos, prev_decl.pos)
+            NameRedeclared {
+                decl: (name, decl),
+                prev_decl,
+            } => {
+                format!(
+                    "name {}, declared at {}, is redeclared at {}",
+                    name, decl.pos, prev_decl.pos
+                )
             }
 
             VecWithNoSizeAndIvals(v, pos) => {
-                format!("{}: vector {} has no size and initial values", pos, v)
+                format!("{}: vector {} has neither size nor initial values", pos, v)
             }
 
-            VecTooManyIvals { vec_def: (vec, pos), ivals_len, specified_size_plus_1 } => {
-                format!("{}: vector {} has size {} and {} initial values",
-                        pos, vec, specified_size_plus_1, ivals_len)
+            VecTooManyIvals {
+                vec_def: (vec, pos),
+                ivals_len,
+                specified_size_plus_1,
+            } => {
+                format!(
+                    "{}: vector {} has size {} and {} initial values",
+                    pos, vec, specified_size_plus_1, ivals_len
+                )
             }
 
             ExternSymbolNotFound { name, extern_pos } => {
@@ -205,19 +253,30 @@ impl Display for Issue {
             DeclShadowsFnParameter {
                 decl: (name, decl),
                 param_pos,
-                fn_def: (fn_name, fn_pos)
+                fn_def: (fn_name, fn_pos),
             } => {
                 format!("in function {} defined at {}: name {}, declared at {}, shadows a parameter name specified at {}",
                         fn_name, fn_pos, name, decl.pos, param_pos)
             }
 
-            UnnecessaryImport { curr_decl: (name, pos), prev_import_pos } => {
-                format!("{}: name {} is already imported ({})", pos, name, prev_import_pos)
+            UnnecessaryImport {
+                curr_decl: (name, pos),
+                prev_import_pos,
+            } => {
+                format!(
+                    "{}: name {} is already imported ({})",
+                    pos, name, prev_import_pos
+                )
             }
 
-            DeclShadowsPrevious { decl: (name, decl), prev_decl } => {
-                format!("name {}, declared at {}, shadows declaration at {}",
-                        name, decl.pos, prev_decl.pos)
+            DeclShadowsPrevious {
+                decl: (name, decl),
+                prev_decl,
+            } => {
+                format!(
+                    "name {}, declared at {}, shadows declaration at {}",
+                    name, decl.pos, prev_decl.pos
+                )
             }
 
             UnexpectedKeyword(pos) => {
@@ -225,21 +284,30 @@ impl Display for Issue {
             }
 
             CaseEncounteredTwice { curr, prev } => {
-                format!("case encountered twice: first at {}, then at {}", prev, curr)
+                format!(
+                    "case encountered twice: first at {}, then at {}",
+                    prev, curr
+                )
             }
 
             LiteralTooLong(pos) => {
                 format!("the literal at {} is too long", pos)
             }
 
-            NoMainFn => {
-                "no main function found".to_owned()
-            }
+            NoMainFn => "no main function found".to_owned(),
 
-            InvalidParameterCount { expected, actual, pos } => {
-                format!("{}: expected {} parameter(s), got {}", pos, expected, actual)
+            InvalidParameterCount {
+                expected,
+                actual,
+                pos,
+            } => {
+                format!(
+                    "{}: expected {} parameter(s), got {}",
+                    pos, expected, actual
+                )
             }
-        })
+        };
+        write!(f, "{}", msg)
     }
 }
 
@@ -317,7 +385,8 @@ impl TargetPlatform {
     pub(crate) fn calling_convention(&self) -> CallingConvention {
         match self {
             TargetPlatform {
-                platform_name: PlatformName::Windows, arch: Arch::x86_64
+                platform_name: PlatformName::Windows,
+                arch: Arch::x86_64,
             } => CallingConvention {
                 registers_to_pass_args: vec!["rcx", "rdx", "r8", "r9"],
                 use_shadow_space: true,
@@ -328,7 +397,8 @@ impl TargetPlatform {
                 reg_for_initial_rsp: "rbp",
             },
             TargetPlatform {
-                platform_name: PlatformName::Linux, arch: Arch::x86_64
+                platform_name: PlatformName::Linux,
+                arch: Arch::x86_64,
             } => CallingConvention {
                 registers_to_pass_args: vec!["rdi", "rsi", "rdx", "rcx", "r8", "r9"],
                 use_shadow_space: false,
@@ -343,14 +413,16 @@ impl TargetPlatform {
 
     pub(crate) fn native() -> Self {
         TargetPlatform {
-            platform_name:
-            if cfg!(target_os = "linux") {
+            platform_name: if cfg!(target_os = "linux") {
                 PlatformName::Linux
             } else if cfg!(target_os = "windows") {
                 PlatformName::Windows
             } else {
                 let default_platform = TargetPlatform::default().platform_name;
-                println!("Failed to determine the native OS. Assuming it's {}", default_platform);
+                println!(
+                    "Failed to determine the native OS. Assuming it's {}",
+                    default_platform
+                );
                 default_platform
             },
             arch: {
@@ -360,8 +432,10 @@ impl TargetPlatform {
                     Arch::x86_64
                 } else {
                     let default_arch = TargetPlatform::default().arch;
-                    println!("Failed to determine the native architecture. Assuming it's {}",
-                             default_arch);
+                    println!(
+                        "Failed to determine the native architecture. Assuming it's {}",
+                        default_arch
+                    );
                     default_arch
                 }
             },
@@ -397,26 +471,27 @@ impl Default for CompilerOptions {
 }
 
 pub(crate) fn get_escape_sequences() -> HashMap<String, String> {
-    vec![('0', '\0'),
-         ('e', 4 as char),  // ASCII EOT, B end of string),
-         ('(', '{'),
-         (')', '}'),
-         ('t', '\t'),
-         ('*', '*'),
-         ('\'', '\\'),
-         ('"', '"'),
-         ('n', '\n')]
-        .into_iter()
-        .map(|x| (format!("*{}", x.0), x.1.to_string()))
-        .collect()
+    vec![
+        ('0', '\0'),
+        ('e', 4 as char), // ASCII EOT, B end of string),
+        ('(', '{'),
+        (')', '}'),
+        ('t', '\t'),
+        ('*', '*'),
+        ('\'', '\\'),
+        ('"', '"'),
+        ('n', '\n'),
+    ]
+    .into_iter()
+    .map(|x| (format!("*{}", x.0), x.1.to_string()))
+    .collect()
 }
 
-pub(crate) type ReservedSymbolsTable = HashMap<String,
-    ReservedName>;
+pub(crate) type ReservedSymbolsTable = HashMap<String, ReservedName>;
 
 pub(crate) fn get_reserved_symbols() -> ReservedSymbolsTable {
-    use DeclarationSpecifier::*;
     use CtrlStmtIdent::*;
+    use DeclarationSpecifier::*;
 
     vec![
         ("auto", ReservedName::DeclarationSpecifier(Auto)),
@@ -431,7 +506,10 @@ pub(crate) fn get_reserved_symbols() -> ReservedSymbolsTable {
         ("break", ReservedName::CtrlStmt(Break)),
         ("continue", ReservedName::CtrlStmt(Continue)),
         ("default", ReservedName::CtrlStmt(Default)),
-    ].into_iter().map(|x| (x.0.to_string(), x.1)).collect()
+    ]
+    .into_iter()
+    .map(|x| (x.0.to_string(), x.1))
+    .collect()
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -442,12 +520,16 @@ pub(crate) enum NumberOfParameters {
 
 impl Display for NumberOfParameters {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", match self {
-            NumberOfParameters::Exact(n) => n.to_string(),
-            NumberOfParameters::AtLeast(n) => {
-                format!("at least {}", n)
+        write!(
+            f,
+            "{}",
+            match self {
+                NumberOfParameters::Exact(n) => n.to_string(),
+                NumberOfParameters::AtLeast(n) => {
+                    format!("at least {}", n)
+                }
             }
-        })
+        )
     }
 }
 
@@ -458,69 +540,68 @@ pub(crate) struct FnDef {
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub(crate) enum StdNameInfo {
-    Variable {
-        ival: i64
-    },
+    Variable { ival: i64 },
     Function(FnDef),
 }
 
 pub(crate) fn get_standard_library_names() -> HashMap<&'static str, StdNameInfo> {
     let mut std_lib_fns_with_exact_num_of_params = Vec::<(&'static str, usize)>::new();
 
-    std_lib_fns_with_exact_num_of_params.extend(
-        vec![
-            ("getchar", 0),
-            ("putchar", 1),
-            ("openr", 2),
-            ("openw", 2),
-            ("getstr", 1),
-            ("putstr", 1),
-            ("system", 1),
-            ("close", 1),
-            ("flush", 0),
-            ("reread", 0),
-        ]);
+    std_lib_fns_with_exact_num_of_params.extend(vec![
+        ("getchar", 0),
+        ("putchar", 1),
+        ("openr", 2),
+        ("openw", 2),
+        ("getstr", 1),
+        ("putstr", 1),
+        ("system", 1),
+        ("close", 1),
+        ("flush", 0),
+        ("reread", 0),
+    ]);
 
     std_lib_fns_with_exact_num_of_params.push(("ioerrors", 1));
 
-    std_lib_fns_with_exact_num_of_params.extend(
-        vec![
-            ("char", 2),
-            ("lchar", 3),
-            ("getarg", 3),
-        ]);
+    std_lib_fns_with_exact_num_of_params.extend(vec![("char", 2), ("lchar", 3), ("getarg", 3)]);
 
-    std_lib_fns_with_exact_num_of_params.extend(
-        vec![
-            ("getvec", 1),
-            ("rlsevec", 2),
-            ("nargs", 0),
-            ("exit", 0),
-        ]);
+    std_lib_fns_with_exact_num_of_params.extend(vec![
+        ("getvec", 1),
+        ("rlsevec", 2),
+        ("nargs", 0),
+        ("exit", 0),
+    ]);
 
     let std_lib_fns_with_exact_num_of_params = std_lib_fns_with_exact_num_of_params
         .into_iter()
-        .map(|(name, num_of_params)|
-            (name,
-             StdNameInfo::Function(FnDef {
-                 num_of_params: NumberOfParameters::Exact(num_of_params),
-             })))
+        .map(|(name, num_of_params)| {
+            (
+                name,
+                StdNameInfo::Function(FnDef {
+                    num_of_params: NumberOfParameters::Exact(num_of_params),
+                }),
+            )
+        })
         .collect::<HashMap<&'static str, StdNameInfo>>();
 
-    let printf = ("printf", StdNameInfo::Function(FnDef {
-        num_of_params: NumberOfParameters::AtLeast(1),
-    }));
-    let concat = ("concat", StdNameInfo::Function(FnDef {
-        num_of_params: NumberOfParameters::AtLeast(1),
-    }));
+    let printf = (
+        "printf",
+        StdNameInfo::Function(FnDef {
+            num_of_params: NumberOfParameters::AtLeast(1),
+        }),
+    );
+    let concat = (
+        "concat",
+        StdNameInfo::Function(FnDef {
+            num_of_params: NumberOfParameters::AtLeast(1),
+        }),
+    );
     let mut std_lib_fns_with_variable_num_of_params = HashSet::new();
     std_lib_fns_with_variable_num_of_params.extend(vec![printf, concat].into_iter());
 
     let mut std_lib_fns = std_lib_fns_with_exact_num_of_params;
     std_lib_fns.extend(std_lib_fns_with_variable_num_of_params.into_iter());
 
-    let std_lib_vars: HashMap<&'static str, StdNameInfo> = vec![("wr.unit", 1),
-                                                                ("rd.unit", 0)]
+    let std_lib_vars: HashMap<&'static str, StdNameInfo> = [("wr.unit", 1), ("rd.unit", 0)]
         .into_iter()
         .map(|(var_name, ival)| (var_name, StdNameInfo::Variable { ival }))
         .collect();

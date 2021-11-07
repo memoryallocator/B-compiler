@@ -1,19 +1,18 @@
-use std::*;
-use collections::HashMap;
-use convert::TryInto;
-use cmp::max;
-use ops::RangeInclusive;
 use cell::Cell;
+use cmp::max;
+use collections::HashMap;
+use ops::RangeInclusive;
+use std::*;
 
 use crate::config::CompilerOptions;
-use crate::tokenizer::token;
-use token::*;
 use crate::parser;
-use parser::{ScopeTable, MultiMap};
+use crate::tokenizer::token;
+use ast::flat_ast::*;
+use ast::{ConstantNode, FunctionCallNode, IncDecNode, IncDecType, Rvalue, Unary};
 use parser::analyzer::*;
 use parser::ast;
-use ast::flat_ast::*;
-use ast::{Rvalue, ConstantNode, IncDecType, IncDecNode, Unary, FunctionCallNode};
+use parser::{MultiMap, ScopeTable};
+use token::*;
 
 #[derive(Debug)]
 pub(crate) enum Ival {
@@ -50,14 +49,23 @@ struct CaseWithVal {
 type LocalVarToNoAndStackRange<'a> = MultiMap<Option<&'a String>, (u64, StackRange)>;
 
 enum StmtRequiringEndMarker<'a> {
-    If { cond_is_false_label: u64, after_both_branches: Option<u64> },
-    While { check_cond_label: u64, after_last_stmt: u64 },
+    If {
+        cond_is_false_label: u64,
+        after_both_branches: Option<u64>,
+    },
+    While {
+        check_cond_label: u64,
+        after_last_stmt: u64,
+    },
     Switch {
         regular_cases: Vec<CaseWithVal>,
         default_case_label: Option<u64>,
         after_last_stmt: u64,
     },
-    Compound { parent_stack: LocalVarToNoAndStackRange<'a>, parent_stack_size: u64 },
+    Compound {
+        parent_stack: LocalVarToNoAndStackRange<'a>,
+        parent_stack_size: u64,
+    },
 }
 
 #[derive(Debug)]
@@ -92,16 +100,14 @@ impl From<RichBinaryOperation> for BinaryOp {
     fn from(bin_op: RichBinaryOperation) -> Self {
         use BinaryOp::*;
         match bin_op {
-            RichBinaryOperation::RegularBinary(bin_op) => {
-                match bin_op {
-                    BinaryOperation::Div => Div,
-                    BinaryOperation::Mod => Mod,
-                    BinaryOperation::Or => Or,
-                    BinaryOperation::Xor => Xor,
-                    BinaryOperation::Shift(l_o_r) => Shift(l_o_r),
-                    BinaryOperation::Cmp(rel) => Cmp(rel),
-                }
-            }
+            RichBinaryOperation::RegularBinary(bin_op) => match bin_op {
+                BinaryOperation::Div => Div,
+                BinaryOperation::Mod => Mod,
+                BinaryOperation::Or => Or,
+                BinaryOperation::Xor => Xor,
+                BinaryOperation::Shift(l_o_r) => Shift(l_o_r),
+                BinaryOperation::Cmp(rel) => Cmp(rel),
+            },
             RichBinaryOperation::Add => Add,
             RichBinaryOperation::Sub => Sub,
             RichBinaryOperation::Mul => Mul,
@@ -156,13 +162,10 @@ pub(crate) enum StackRange {
 
 fn is_regular_node(node: &FlatNode) -> bool {
     use FlatNode::*;
-    match node {
-        Compound | If(_) | While(_) | Switch(_)
-        | Def(_) | EndOfStmt { .. } => {
-            false
-        }
-        _ => true
-    }
+    !matches!(
+        node,
+        Compound | If(_) | While(_) | Switch(_) | Def(_) | EndOfStmt { .. },
+    )
 }
 
 impl<'a> IntermediateCodeGenerator<'a> {
@@ -192,9 +195,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 vec![LoadLvalue(
                     if let Some(info) = self.local_scope.unwrap().get(name) {
                         match info.info {
-                            ProcessedDeclInfo::Label => {
-                                Lvalue::Label(Label::Local(name.clone()))
-                            }
+                            ProcessedDeclInfo::Label => Lvalue::Label(Label::Local(name.clone())),
                             ProcessedDeclInfo::FnParameter { param_no } => {
                                 Lvalue::NthArg(1 + param_no)
                             }
@@ -203,9 +204,9 @@ impl<'a> IntermediateCodeGenerator<'a> {
                                 Lvalue::Label(Label::Global(name.clone()))
                             }
                             ProcessedDeclInfo::Auto { .. } => {
-                                if let Some(
-                                    (_, st)
-                                ) = self.name_to_stack_range.get_last(&Some(name)) {
+                                if let Some((_, st)) =
+                                    self.name_to_stack_range.get_last(&Some(name))
+                                {
                                     Lvalue::LocalVar(st.clone())
                                 } else {
                                     unreachable!()
@@ -214,11 +215,10 @@ impl<'a> IntermediateCodeGenerator<'a> {
                         }
                     } else {
                         unreachable!()
-                    })]
+                    },
+                )]
             }
-            ast::Lvalue::DerefRvalue(rv) => {
-                self.process_rvalue(&rv.rvalue)
-            }
+            ast::Lvalue::DerefRvalue(rv) => self.process_rvalue(&rv.rvalue),
             ast::Lvalue::Indexing { vector, index } => {
                 let mut res = self.process_rvalue(&vector.rvalue);
                 res.push(Save);
@@ -232,30 +232,32 @@ impl<'a> IntermediateCodeGenerator<'a> {
     fn process_rvalue(&mut self, rv: &Rvalue) -> Vec<IntermRepr> {
         use IntermRepr::*;
         match rv {
-            Rvalue::Constant(c) => {
-                match &c.constant {
-                    token::Constant::Number(x) => {
-                        vec![LoadConstant(*x)]
-                    }
-                    token::Constant::String(s) => {
-                        let idx = self.try_add_to_str_pool(s);
-                        vec![LoadLvalue(Lvalue::Label(Label::PooledStr(idx)))]
-                    }
+            Rvalue::Constant(c) => match &c.constant {
+                token::Constant::Number(x) => {
+                    vec![LoadConstant(*x)]
                 }
-            }
+                token::Constant::String(s) => {
+                    let idx = self.try_add_to_str_pool(s);
+                    vec![LoadLvalue(Lvalue::Label(Label::PooledStr(idx)))]
+                }
+            },
             Rvalue::Lvalue(lv) => {
                 let mut res = self.process_lvalue(&lv.lvalue);
                 if let ast::Lvalue::Name(name) = &lv.lvalue {
-                    if let Some(
-                        DeclInfoAndPos { info, .. }
-                    ) = self.local_scope.unwrap().get(name) {
+                    if let Some(DeclInfoAndPos { info, .. }) = self.local_scope.unwrap().get(name) {
                         match info {
-                            ProcessedDeclInfo::Auto { size_if_vec: Some(_) }
-                            | ProcessedDeclInfo::ExplicitExtern(
-                                DefInfoAndPos { info: DefInfo::Vector { .. }, .. })
+                            ProcessedDeclInfo::Auto {
+                                size_if_vec: Some(_),
+                            }
+                            | ProcessedDeclInfo::ExplicitExtern(DefInfoAndPos {
+                                info: DefInfo::Vector { .. },
+                                ..
+                            })
                             | ProcessedDeclInfo::AssumedExternFnCall(_)
-                            | ProcessedDeclInfo::ExplicitExtern(
-                                DefInfoAndPos { info: DefInfo::Function { .. }, .. })
+                            | ProcessedDeclInfo::ExplicitExtern(DefInfoAndPos {
+                                info: DefInfo::Function { .. },
+                                ..
+                            })
                             | ProcessedDeclInfo::Label => {
                                 return res;
                             }
@@ -289,11 +291,11 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 res.push(BinOp(BinaryOp::from(*bin_op)));
                 res
             }
-            Rvalue::IncDec(
-                IncDecNode {
-                    inc_or_dec, inc_dec_type, lvalue
-                }
-            ) => {
+            Rvalue::IncDec(IncDecNode {
+                inc_or_dec,
+                inc_dec_type,
+                lvalue,
+            }) => {
                 let mut res = self.process_lvalue(&lvalue.lvalue);
                 res.push(LvUnary(IncDec {
                     inc_or_dec: *inc_or_dec,
@@ -311,10 +313,13 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 }
                 res
             }
-            Rvalue::TakeAddress(lv) => {
-                self.process_lvalue(&lv.lvalue)
-            }
-            Rvalue::ConditionalExpression { condition, on_true, on_false, .. } => {
+            Rvalue::TakeAddress(lv) => self.process_lvalue(&lv.lvalue),
+            Rvalue::ConditionalExpression {
+                condition,
+                on_true,
+                on_false,
+                ..
+            } => {
                 let out = self.label_counter.next().unwrap();
                 let on_false_label = self.label_counter.next().unwrap();
                 let mut res = self.process_rvalue(&condition.rvalue);
@@ -328,9 +333,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 res.push(InternalLabel(out));
                 res
             }
-            Rvalue::BracketedExpression(rv) => {
-                self.process_rvalue(&rv.rvalue)
-            }
+            Rvalue::BracketedExpression(rv) => self.process_rvalue(&rv.rvalue),
             Rvalue::FunctionCall(FunctionCallNode { fn_name, arguments }) => {
                 let mut res = vec![];
                 for arg in arguments.iter().rev() {
@@ -340,7 +343,9 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 res.push(LoadConstant(arguments.len().try_into().unwrap()));
                 res.push(Save);
                 res.extend(self.process_rvalue(&fn_name.rvalue));
-                res.push(Call { nargs: arguments.len().try_into().unwrap() });
+                res.push(Call {
+                    nargs: arguments.len().try_into().unwrap(),
+                });
                 res
             }
         }
@@ -354,48 +359,45 @@ impl<'a> IntermediateCodeGenerator<'a> {
         use IntermRepr::*;
         debug_assert!(is_regular_node(node));
         match node {
-            FlatNode::Decl(decl) => {
-                match &decl.info {
-                    FlatDeclarationNameInfo::Extern => vec![],
-                    FlatDeclarationNameInfo::Label => {
-                        vec![DeclLabel(decl.name.clone())]
-                    }
-
-                    FlatDeclarationNameInfo::Auto { specified_size_if_vec } => {
-                        let local_var_no = self.name_to_stack_range
-                            .total_items()
-                            .try_into()
-                            .unwrap();
-                        if let Some(
-                            ConstantNode { constant: token::Constant::Number(spec_size), .. }
-                        ) = specified_size_if_vec {
-                            let upper = self.stack_size_in_words + spec_size;
-                            let span = StackRange::Span(self.stack_size_in_words..=upper);
-
-                            self.name_to_stack_range.insert(Some(&decl.name),
-                                                            (local_var_no, span));
-                            self.stack_size_in_words = upper + 1;
-                        } else {
-                            self.name_to_stack_range.insert(
-                                Some(&decl.name),
-                                (local_var_no, StackRange::Exact(self.stack_size_in_words)));
-                            self.stack_size_in_words += 1;
-                        }
-                        curr_fn.stack_size = max(curr_fn.stack_size, self.stack_size_in_words);
-                        vec![]
-                    }
+            FlatNode::Decl(decl) => match &decl.info {
+                FlatDeclarationNameInfo::Extern => vec![],
+                FlatDeclarationNameInfo::Label => {
+                    vec![DeclLabel(decl.name.clone())]
                 }
-            }
-            FlatNode::Rvalue(rv) => {
-                self.process_rvalue(rv)
-            }
-            FlatNode::Else => {
-                if let Some(
-                    StmtRequiringEndMarker::If {
-                        cond_is_false_label: condition_is_false_label,
-                        after_both_branches
+
+                FlatDeclarationNameInfo::Auto {
+                    specified_size_if_vec,
+                } => {
+                    let local_var_no = self.name_to_stack_range.total_items().try_into().unwrap();
+                    if let Some(ConstantNode {
+                        constant: token::Constant::Number(spec_size),
+                        ..
+                    }) = specified_size_if_vec
+                    {
+                        let upper = self.stack_size_in_words + spec_size;
+                        let span = StackRange::Span(self.stack_size_in_words..=upper);
+
+                        self.name_to_stack_range
+                            .insert(Some(&decl.name), (local_var_no, span));
+                        self.stack_size_in_words = upper + 1;
+                    } else {
+                        self.name_to_stack_range.insert(
+                            Some(&decl.name),
+                            (local_var_no, StackRange::Exact(self.stack_size_in_words)),
+                        );
+                        self.stack_size_in_words += 1;
                     }
-                ) = self.stmts_requiring_end_marker.last_mut() {
+                    curr_fn.stack_size = max(curr_fn.stack_size, self.stack_size_in_words);
+                    vec![]
+                }
+            },
+            FlatNode::Rvalue(rv) => self.process_rvalue(rv),
+            FlatNode::Else => {
+                if let Some(StmtRequiringEndMarker::If {
+                    cond_is_false_label: condition_is_false_label,
+                    after_both_branches,
+                }) = self.stmts_requiring_end_marker.last_mut()
+                {
                     let after_else_body = self.label_counter.next().unwrap();
                     debug_assert!(after_both_branches.is_none());
                     *after_both_branches = Some(after_else_body);
@@ -410,9 +412,13 @@ impl<'a> IntermediateCodeGenerator<'a> {
             FlatNode::Break => {
                 let idx = self.last_breakable_stmt_idxs_stack.last().unwrap();
                 let last_br_stmt = &self.stmts_requiring_end_marker[*idx];
-                if let StmtRequiringEndMarker::Switch { after_last_stmt, .. }
-                | StmtRequiringEndMarker::While { after_last_stmt, .. }
-                = last_br_stmt {
+                if let StmtRequiringEndMarker::Switch {
+                    after_last_stmt, ..
+                }
+                | StmtRequiringEndMarker::While {
+                    after_last_stmt, ..
+                } = last_br_stmt
+                {
                     vec![Jump(*after_last_stmt)]
                 } else {
                     unreachable!()
@@ -421,7 +427,10 @@ impl<'a> IntermediateCodeGenerator<'a> {
             FlatNode::Continue => {
                 let idx = self.while_stmt_idxs_stack.last().unwrap();
                 let last_wh_stmt = &self.stmts_requiring_end_marker[*idx];
-                if let StmtRequiringEndMarker::While { check_cond_label, .. } = last_wh_stmt {
+                if let StmtRequiringEndMarker::While {
+                    check_cond_label, ..
+                } = last_wh_stmt
+                {
                     vec![Jump(*check_cond_label)]
                 } else {
                     unreachable!()
@@ -436,12 +445,17 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 let idx = self.last_breakable_stmt_idxs_stack.last().unwrap();
                 let switch_stmt = &mut self.stmts_requiring_end_marker[*idx];
                 if let StmtRequiringEndMarker::Switch {
-                    regular_cases, default_case_label, ..
-                } = switch_stmt {
+                    regular_cases,
+                    default_case_label,
+                    ..
+                } = switch_stmt
+                {
                     let label_no = self.label_counter.next().unwrap();
-                    if let Some(
-                        ConstantNode { constant: Constant::Number(case_val), .. }
-                    ) = constant {
+                    if let Some(ConstantNode {
+                        constant: Constant::Number(case_val),
+                        ..
+                    }) = constant
+                    {
                         regular_cases.push(CaseWithVal {
                             case_val: *case_val,
                             label_no,
@@ -463,7 +477,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 res.push(Ret);
                 res
             }
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 
@@ -482,8 +496,8 @@ impl<'a> IntermediateCodeGenerator<'a> {
             } else {
                 match &node.node {
                     FlatNode::Compound => {
-                        self.stmts_requiring_end_marker.push(
-                            StmtRequiringEndMarker::Compound {
+                        self.stmts_requiring_end_marker
+                            .push(StmtRequiringEndMarker::Compound {
                                 parent_stack: self.name_to_stack_range.clone(),
                                 parent_stack_size: self.stack_size_in_words,
                             });
@@ -493,8 +507,8 @@ impl<'a> IntermediateCodeGenerator<'a> {
                         res.extend(self.process_rvalue(rv));
                         let condition_is_false_label = self.label_counter.next().unwrap();
                         res.push(TestAndJumpIfZero(condition_is_false_label));
-                        self.stmts_requiring_end_marker.push(
-                            StmtRequiringEndMarker::If {
+                        self.stmts_requiring_end_marker
+                            .push(StmtRequiringEndMarker::If {
                                 cond_is_false_label: condition_is_false_label,
                                 after_both_branches: None,
                             });
@@ -519,13 +533,14 @@ impl<'a> IntermediateCodeGenerator<'a> {
 
                     FlatNode::Switch(rv) => {
                         res.extend(self.process_rvalue(rv));
-                        self.last_breakable_stmt_idxs_stack.push(
-                            self.stmts_requiring_end_marker.len());
-                        self.stmts_requiring_end_marker.push(StmtRequiringEndMarker::Switch {
-                            regular_cases: vec![],
-                            default_case_label: None,
-                            after_last_stmt: self.label_counter.next().unwrap(),
-                        })
+                        self.last_breakable_stmt_idxs_stack
+                            .push(self.stmts_requiring_end_marker.len());
+                        self.stmts_requiring_end_marker
+                            .push(StmtRequiringEndMarker::Switch {
+                                regular_cases: vec![],
+                                default_case_label: None,
+                                after_last_stmt: self.label_counter.next().unwrap(),
+                            })
                     }
 
                     FlatNode::EndOfStmt { positions_away } => {
@@ -533,7 +548,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                         match self.stmts_requiring_end_marker.pop().unwrap() {
                             StmtRequiringEndMarker::Compound {
                                 parent_stack,
-                                parent_stack_size
+                                parent_stack_size,
                             } => {
                                 self.name_to_stack_range = parent_stack;
                                 self.stack_size_in_words = parent_stack_size;
@@ -541,7 +556,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
 
                             StmtRequiringEndMarker::If {
                                 cond_is_false_label,
-                                after_both_branches
+                                after_both_branches,
                             } => {
                                 if let Some(after_both_branches) = after_both_branches {
                                     res.push(InternalLabel(after_both_branches))
@@ -551,7 +566,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                             }
                             StmtRequiringEndMarker::While {
                                 check_cond_label: check_condition_label,
-                                after_last_stmt
+                                after_last_stmt,
                             } => {
                                 let wh = self.while_stmt_idxs_stack.pop();
                                 let br = self.last_breakable_stmt_idxs_stack.pop();
@@ -563,7 +578,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                             StmtRequiringEndMarker::Switch {
                                 regular_cases,
                                 default_case_label,
-                                after_last_stmt
+                                after_last_stmt,
                             } => {
                                 self.last_breakable_stmt_idxs_stack.pop();
                                 let mut case_table = vec![];
@@ -581,10 +596,9 @@ impl<'a> IntermediateCodeGenerator<'a> {
                         }
                         return (res, i + 1);
                     }
-                    _ => unreachable!()
+                    _ => unreachable!(),
                 }
-                let (nodes, adv) = self.process_slice(curr_fn,
-                                                      &prog_slice[i + 1..]);
+                let (nodes, adv) = self.process_slice(curr_fn, &prog_slice[i + 1..]);
                 res.extend(nodes);
                 i += adv;
             }
@@ -595,7 +609,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
 
     fn reset_everything_except_str_pool(&mut self) {
         let str_pool = self.str_pool.take();
-        *self = Self::from(Self::new(self.compiler_options, self.global_definitions));
+        *self = Self::new(self.compiler_options, self.global_definitions);
         self.str_pool = Cell::new(str_pool);
     }
 
@@ -606,26 +620,32 @@ impl<'a> IntermediateCodeGenerator<'a> {
         self.reset_everything_except_str_pool();
         let mut res = vec![];
         use IntermRepr::*;
-        if let FlatNode::Def(
-            FlatDefinition { name, info: FlatDefinitionInfo::Function { params } }
-        ) = &prog_slice[0].0.node {
-            self.params_order = params.iter().enumerate().map(|(i, (param, _))| {
-                (param, i.try_into().unwrap())
-            }).collect();
-            res.push(FnDef(name.clone(), FnInfo {
-                stack_size: 0,
-                num_of_params: params.len() as u64,
-            }))
+        if let FlatNode::Def(FlatDefinition {
+            name,
+            info: FlatDefinitionInfo::Function { params },
+        }) = &prog_slice[0].0.node
+        {
+            self.params_order = params
+                .iter()
+                .enumerate()
+                .map(|(i, (param, _))| (param, i.try_into().unwrap()))
+                .collect();
+            res.push(FnDef(
+                name.clone(),
+                FnInfo {
+                    stack_size: 0,
+                    num_of_params: params.len() as u64,
+                },
+            ))
         } else {
             unreachable!()
         }
 
-        let curr_fn =
-            if let FnDef(_, info) = &mut res[0] {
-                info
-            } else {
-                unreachable!()
-            };
+        let curr_fn = if let FnDef(_, info) = &mut res[0] {
+            info
+        } else {
+            unreachable!()
+        };
         let (rest_of_nodes, adv) = self.process_slice(curr_fn, &prog_slice[1..]);
         res.extend(rest_of_nodes);
         res.push(Ret);
@@ -645,8 +665,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
     fn name_or_constant_to_ival(&mut self, x: &NameOrConstant) -> Ival {
         match x {
             NameOrConstant::Name(name) => Ival::Name(Label::Global(name.clone())),
-            NameOrConstant::Constant(token::Constant::Number(n)) =>
-                Ival::Number(*n),
+            NameOrConstant::Constant(token::Constant::Number(n)) => Ival::Number(*n),
             NameOrConstant::Constant(token::Constant::String(s)) => {
                 let idx = self.try_add_to_str_pool(s);
                 Ival::Name(Label::PooledStr(idx))
@@ -662,12 +681,11 @@ impl<'a> IntermediateCodeGenerator<'a> {
         for (name, def) in &program.global {
             match &def.info {
                 DefInfo::Variable(VarDefInfo::UserVar { ival }) => {
-                    let ival =
-                        if let Some(ival) = ival {
-                            self.name_or_constant_to_ival(&ival.value)
-                        } else {
-                            Ival::Number(0)
-                        };
+                    let ival = if let Some(ival) = ival {
+                        self.name_or_constant_to_ival(&ival.value)
+                    } else {
+                        Ival::Number(0)
+                    };
                     res.push(IntermRepr::VarOrVecDef(name.clone()));
                     res.push(IntermRepr::Ival(ival))
                 }
@@ -689,8 +707,8 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 _ => (),
             }
         }
-        let flat_nodes: Vec<&FlatNodeAndPos> = program.local.iter().map(|x| &x.0).collect();
-        for rng in get_fns_ranges(flat_nodes.into_iter()) {
+
+        for rng in get_fns_ranges(program.local.iter().map(|x| &x.0)) {
             let rng_len = rng.len();
             let (ir, adv) = self.process_function(&program.local[rng]);
             debug_assert_eq!(adv, rng_len);

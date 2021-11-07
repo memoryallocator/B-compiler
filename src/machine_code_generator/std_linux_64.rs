@@ -1,5 +1,5 @@
-use std::*;
 use iter::FromIterator;
+use std::*;
 
 use super::*;
 
@@ -11,23 +11,26 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
     let call_conv = TARGET.calling_convention();
     let stdin = 0;
     let stdout = 1;
-    let syscalls = HashMap::<&str, i32>::from_iter(vec![
-        ("read", 0),
-        ("write", 1),
-        ("mmap", 9),
-        ("munmap", 11),
-        ("exit", 60),
-    ].into_iter());
-    let mut res = vec![];
+    let syscalls = HashMap::<&str, i32>::from_iter(
+        vec![
+            ("read", 0),
+            ("write", 1),
+            ("mmap", 9),
+            ("munmap", 11),
+            ("exit", 60),
+        ]
+        .into_iter(),
+    );
+    let mut res = vec![executable_section_or_segment(TARGET).to_owned()];
 
-    res.push(executable_section_or_segment(TARGET).to_owned());
     for (name, info) in get_standard_library_names() {
         if let StdNameInfo::Variable { .. } = info {
             continue;
         }
         res.push(format!("{}:", internal_def(name)));
         res.push(match name {
-            "putchar" => format!(r"
+            "putchar" => format!(
+                r"
                     push r13
                     xor r13, r13
                     lea rsp, [rsp - 2 * 8]
@@ -52,9 +55,13 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                 .out:
                     lea rsp, [rsp + 2 * 8]
                     pop r13
-                    ret", stdout = stdout, write = syscalls["write"]),
+                    ret",
+                stdout = stdout,
+                write = syscalls["write"]
+            ),
 
-            "getchar" => format!(r"
+            "getchar" => format!(
+                r"
                     mov rdi, {stdin}
                     lea rsp, [rsp - 8]
                     mov rsi, rsp
@@ -63,17 +70,24 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                     syscall
                     movzx rax, BYTE [rsp]
                     lea rsp, [rsp + 8]
-                    ret", stdin = stdin, read = syscalls["read"]),
+                    ret",
+                stdin = stdin,
+                read = syscalls["read"]
+            ),
 
-            "exit" => format!(r"
+            "exit" => format!(
+                r"
                             xor rdi, rdi
                             mov rax, {exit}
-                            syscall", exit = syscalls["exit"]),
+                            syscall",
+                exit = syscalls["exit"]
+            ),
 
             "char" => r"
                     rol rsi, 3
                     movzx rax, BYTE [rsi + rdx]
-                    ret".to_owned(),
+                    ret"
+            .to_owned(),
 
             "getvec" => {
                 const PROT_READ: i32 = 0x1;
@@ -81,7 +95,8 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                 const MAP_PRIVATE: i32 = 0x2;
                 const MAP_ANONYMOUS: i32 = 0x20;
 
-                format!(r"
+                format!(
+                    r"
                     xor rdi, rdi
                     inc rsi
                     shl rsi, 3
@@ -100,21 +115,27 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                         ret
                     .assign_null:
                         xor rax, rax
-                        ret", prot = PROT_READ | PROT_WRITE,
-                        flags = MAP_PRIVATE | MAP_ANONYMOUS,
-                        mmap = syscalls["mmap"])
+                        ret",
+                    prot = PROT_READ | PROT_WRITE,
+                    flags = MAP_PRIVATE | MAP_ANONYMOUS,
+                    mmap = syscalls["mmap"]
+                )
             }
 
-            "rlsevec" => format!(r"
+            "rlsevec" => format!(
+                r"
                     rol rsi, 3
                     inc rdx
                     mov rax, {munmap}
                     lea rsp, [rsp - 8]
                     syscall
                     lea rsp, [rsp + 8]
-                    ret", munmap = syscalls["munmap"]),
+                    ret",
+                munmap = syscalls["munmap"]
+            ),
 
-            "printf" => format!(r"
+            "printf" => format!(
+                r"
                     pop rax
                     push r9
                     push r8
@@ -226,12 +247,15 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                         call {internal_putstr}
 
                     lea rsp, [rsp + 3 * 8]
-                    ret", MAX_LEN = 22,
-                                internal_putchar = internal_def("putchar"),
-                                print_unsigned = internal_def("print_unsigned"),
-                                internal_putstr = internal_def("putstr")),
+                    ret",
+                MAX_LEN = 22,
+                internal_putchar = internal_def("putchar"),
+                print_unsigned = internal_def("print_unsigned"),
+                internal_putstr = internal_def("putstr")
+            ),
 
-            "putstr" => format!(r"
+            "putstr" => format!(
+                r"
                     push r15
                     mov r15, rsi
                     rol r15, 3
@@ -246,11 +270,16 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                         jmp .iter_str
                     .out:
                         pop r15
-                        ret", internal_putchar = internal_def("putchar")),
+                        ret",
+                internal_putchar = internal_def("putchar")
+            ),
 
             "nargs" => {
-                format!("mov rax, [{base} - 8]
-                        ret", base = call_conv.reg_for_initial_rsp)
+                format!(
+                    "mov rax, [{base} - 8]
+                        ret",
+                    base = call_conv.reg_for_initial_rsp
+                )
             }
 
             _ => "dq 0".to_owned(),

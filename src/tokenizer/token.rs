@@ -1,7 +1,6 @@
-use std::*;
-use convert::TryFrom;
 use borrow::Borrow;
 use fmt::{Display, Formatter};
+use std::*;
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Hash)]
 pub(crate) enum BracketType {
@@ -20,8 +19,7 @@ pub(crate) struct Bracket {
 impl Bracket {
     pub(crate) fn is_pair<T: Borrow<Bracket>>(&self, br: T) -> bool {
         let br = br.borrow();
-        self.left_or_right != br.left_or_right
-            && self.bracket_type == br.bracket_type
+        self.left_or_right != br.left_or_right && self.bracket_type == br.bracket_type
     }
 
     pub(crate) fn from_char_unchecked(c: char) -> Bracket {
@@ -29,8 +27,8 @@ impl Bracket {
     }
 
     pub(crate) fn from_char(c: char) -> Option<Bracket> {
-        use LeftOrRight::*;
         use BracketType::*;
+        use LeftOrRight::*;
 
         match c {
             '(' | '[' | '{' => Some(Bracket {
@@ -39,7 +37,7 @@ impl Bracket {
                     '(' => Round,
                     '[' => Square,
                     '{' => Curly,
-                    _ => unimplemented!()
+                    _ => unimplemented!(),
                 },
                 pair_pos: None,
             }),
@@ -49,11 +47,11 @@ impl Bracket {
                     ')' => Round,
                     ']' => Square,
                     '}' => Curly,
-                    _ => unimplemented!()
+                    _ => unimplemented!(),
                 },
                 pair_pos: None,
             }),
-            _ => None
+            _ => None,
         }
     }
 }
@@ -66,10 +64,14 @@ pub(crate) enum LeftOrRight {
 
 impl Display for LeftOrRight {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", match self {
-            LeftOrRight::Left => "left",
-            LeftOrRight::Right => "right"
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                LeftOrRight::Left => "left",
+                LeftOrRight::Right => "right",
+            }
+        )
     }
 }
 
@@ -87,10 +89,14 @@ pub(crate) enum UnaryOperation {
 
 impl Display for UnaryOperation {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", match self {
-            UnaryOperation::LogicalNot => "!",
-            UnaryOperation::Complement => "~",
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                UnaryOperation::LogicalNot => "!",
+                UnaryOperation::Complement => "~",
+            }
+        )
     }
 }
 
@@ -106,14 +112,18 @@ pub(crate) enum BinaryRelation {
 
 impl Display for BinaryRelation {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", match self {
-            BinaryRelation::Gt => ">",
-            BinaryRelation::Eq => "==",
-            BinaryRelation::Lt => "<",
-            BinaryRelation::Ge => ">=",
-            BinaryRelation::Le => "<=",
-            BinaryRelation::Ne => "!=",
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                BinaryRelation::Gt => ">",
+                BinaryRelation::Eq => "==",
+                BinaryRelation::Lt => "<",
+                BinaryRelation::Ge => ">=",
+                BinaryRelation::Le => "<=",
+                BinaryRelation::Ne => "!=",
+            }
+        )
     }
 }
 
@@ -129,21 +139,26 @@ pub(crate) enum BinaryOperation {
 
 impl Display for BinaryOperation {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", match self {
-            BinaryOperation::Div => "/".to_owned(),
-            BinaryOperation::Mod => "%".to_owned(),
-            BinaryOperation::Or => "|".to_owned(),
-            BinaryOperation::Xor => "^".to_owned(),
-            BinaryOperation::Shift(direction) => {
-                match direction {
-                    LeftOrRight::Left => "<<",
-                    LeftOrRight::Right => ">>",
-                }.to_owned()
+        write!(
+            f,
+            "{}",
+            match self {
+                BinaryOperation::Div => "/".to_owned(),
+                BinaryOperation::Mod => "%".to_owned(),
+                BinaryOperation::Or => "|".to_owned(),
+                BinaryOperation::Xor => "^".to_owned(),
+                BinaryOperation::Shift(direction) => {
+                    match direction {
+                        LeftOrRight::Left => "<<",
+                        LeftOrRight::Right => ">>",
+                    }
+                    .to_owned()
+                }
+                BinaryOperation::Cmp(cmp) => {
+                    format!("{}", cmp)
+                }
             }
-            BinaryOperation::Cmp(cmp) => {
-                format!("{}", cmp)
-            }
-        })
+        )
     }
 }
 
@@ -159,15 +174,19 @@ pub(crate) enum RichBinaryOperation {
 
 impl Display for RichBinaryOperation {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", match self {
-            RichBinaryOperation::RegularBinary(b) => {
-                format!("{}", b)
+        write!(
+            f,
+            "{}",
+            match self {
+                RichBinaryOperation::RegularBinary(b) => {
+                    format!("{}", b)
+                }
+                RichBinaryOperation::Add => "+".to_owned(),
+                RichBinaryOperation::Sub => "-".to_owned(),
+                RichBinaryOperation::Mul => "*".to_owned(),
+                RichBinaryOperation::BitwiseAnd | RichBinaryOperation::LogicalAnd => "&".to_owned(),
             }
-            RichBinaryOperation::Add => "+".to_owned(),
-            RichBinaryOperation::Sub => "-".to_owned(),
-            RichBinaryOperation::Mul => "*".to_owned(),
-            RichBinaryOperation::BitwiseAnd | RichBinaryOperation::LogicalAnd => "&".to_owned(),
-        })
+        )
     }
 }
 
@@ -231,7 +250,11 @@ impl TryFrom<&Token> for Operator {
     type Error = ();
 
     fn try_from(x: &Token) -> Result<Self, Self::Error> {
-        if let Token { token: WrappedToken::Operator(op), .. } = x {
+        if let Token {
+            token: WrappedToken::Operator(op),
+            ..
+        } = x
+        {
             return Ok(*op);
         }
         Err(())
@@ -240,32 +263,38 @@ impl TryFrom<&Token> for Operator {
 
 impl Display for Operator {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", match self {
-            Operator::Plus => "+".to_owned(),
-            Operator::Minus => "-".to_owned(),
-            Operator::Asterisk => "*".to_owned(),
-            Operator::Ampersand => "&".to_owned(),
-            Operator::Unary(un) => {
-                format!("{}", un)
-            }
-            Operator::Binary(bin) => {
-                format!("{}", bin)
-            }
-            Operator::Assign(a) => {
-                "=".to_owned() + &match a.bin_op {
-                    None => "".to_owned(),
-                    Some(bin_op) => {
-                        format!("{}", bin_op)
+        write!(
+            f,
+            "{}",
+            match self {
+                Operator::Plus => "+".to_owned(),
+                Operator::Minus => "-".to_owned(),
+                Operator::Asterisk => "*".to_owned(),
+                Operator::Ampersand => "&".to_owned(),
+                Operator::Unary(un) => {
+                    format!("{}", un)
+                }
+                Operator::Binary(bin) => {
+                    format!("{}", bin)
+                }
+                Operator::Assign(a) => {
+                    "=".to_owned()
+                        + &match a.bin_op {
+                            None => "".to_owned(),
+                            Some(bin_op) => {
+                                format!("{}", bin_op)
+                            }
+                        }
+                }
+                Operator::IncDec(id) => {
+                    match id {
+                        IncOrDec::Increment => "++",
+                        IncOrDec::Decrement => "--",
                     }
+                    .to_owned()
                 }
             }
-            Operator::IncDec(id) => {
-                match id {
-                    IncOrDec::Increment => "++",
-                    IncOrDec::Decrement => "--",
-                }.to_owned()
-            }
-        })
+        )
     }
 }
 
@@ -305,25 +334,19 @@ impl TryFrom<&str> for TokenPos {
     type Error = ();
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        let line_and_col: Vec<&str> =
-            s.split(',').collect();
+        let line_and_col: Vec<&str> = s.split(',').collect();
 
         if line_and_col.len() != 2 {
             return Err(());
         }
 
-        match line_and_col[..2] {
-            [line, col] => {
-                let line = line.parse::<usize>();
-                let column = col.parse::<usize>();
+        if let [line, col] = line_and_col[..2] {
+            let line = line.parse::<usize>();
+            let column = col.parse::<usize>();
 
-                if line.is_ok() && column.is_ok() {
-                    let line = line.unwrap();
-                    let column = column.unwrap();
-                    return Ok(TokenPos { line, column });
-                }
+            if let (Ok(line), Ok(column)) = (line, column) {
+                return Ok(TokenPos { line, column });
             }
-            _ => unreachable!()
         }
 
         Err(())

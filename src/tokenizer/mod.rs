@@ -1,6 +1,6 @@
-use std::*;
 use cell::Cell;
 use collections::HashMap;
+use std::*;
 
 use crate::config::*;
 use token::*;
@@ -16,90 +16,79 @@ pub(crate) struct Tokenizer<'a> {
 fn parse_assign_binary_operator(s: &str) -> Option<(RichBinaryOperation, usize)> {
     use BinaryOperation::*;
     use BinaryRelation::*;
-    use RichBinaryOperation::*;
     use LeftOrRight::*;
+    use RichBinaryOperation::*;
 
-    return Some(
-        match s.chars().take(2).collect::<Vec<char>>().as_slice() {
-            ['=', '='] => (RegularBinary(Cmp(Eq)), 2),
-            ['!', '='] => (RegularBinary(Cmp(Ne)), 2),
+    return Some(match s.chars().take(2).collect::<Vec<char>>().as_slice() {
+        ['=', '='] => (RegularBinary(Cmp(Eq)), 2),
+        ['!', '='] => (RegularBinary(Cmp(Ne)), 2),
 
-            ['<', '='] => (RegularBinary(Cmp(Le)), 2),
-            ['>', '='] => (RegularBinary(Cmp(Ge)), 2),
+        ['<', '='] => (RegularBinary(Cmp(Le)), 2),
+        ['>', '='] => (RegularBinary(Cmp(Ge)), 2),
 
-            ['<', '<'] => (RegularBinary(Shift(Left)), 2),
-            ['>', '>'] => (RegularBinary(Shift(Right)), 2),
+        ['<', '<'] => (RegularBinary(Shift(Left)), 2),
+        ['>', '>'] => (RegularBinary(Shift(Right)), 2),
 
-            ['<', _] => (RegularBinary(Cmp(Lt)), 1),
-            ['>', _] => (RegularBinary(Cmp(Gt)), 1),
+        ['<', _] => (RegularBinary(Cmp(Lt)), 1),
+        ['>', _] => (RegularBinary(Cmp(Gt)), 1),
 
-            ['+', _] => (Add, 1),
-            ['-', _] => (Sub, 1),
+        ['+', _] => (Add, 1),
+        ['-', _] => (Sub, 1),
 
-            ['&', _] => (BitwiseAnd, 1),
-            ['|', _] => (RegularBinary(Or), 1),
-            ['^', _] => (RegularBinary(Xor), 1),
+        ['&', _] => (BitwiseAnd, 1),
+        ['|', _] => (RegularBinary(Or), 1),
+        ['^', _] => (RegularBinary(Xor), 1),
 
-            ['*', _] => (Mul, 1),
-            ['/', _] => (RegularBinary(Div), 1),
-            ['%', _] => (RegularBinary(Mod), 1),
-            _ => return None
-        }
-    );
+        ['*', _] => (Mul, 1),
+        ['/', _] => (RegularBinary(Div), 1),
+        ['%', _] => (RegularBinary(Mod), 1),
+        _ => return None,
+    });
 }
 
 fn parse_operator(s: &str) -> Option<(Operator, usize)> {
-    use Operator::*;
-    use UnaryOperation::*;
+    use token::Assign as AssignStruct;
+    use token::IncOrDec::*;
     use BinaryOperation::*;
     use BinaryRelation::*;
+    use Operator::*;
     use RichBinaryOperation::*;
-    use token::IncOrDec::*;
-    use token::Assign as AssignStruct;
+    use UnaryOperation::*;
 
-    return Some(
-        match s.chars().take(3).collect::<Vec<char>>().as_slice() {
-            ['+', '+', _] => (IncDec(Increment), 2),
-            ['-', '-', _] => (IncDec(Decrement), 2),
+    return Some(match s.chars().take(3).collect::<Vec<char>>().as_slice() {
+        ['+', '+', _] => (IncDec(Increment), 2),
+        ['-', '-', _] => (IncDec(Decrement), 2),
 
-            ['+', _, _] => (Plus, 1),
-            ['-', _, _] => (Minus, 1),
+        ['+', _, _] => (Plus, 1),
+        ['-', _, _] => (Minus, 1),
 
-            ['&', _, _] => (Ampersand, 1),
-            ['*', _, _] => (Asterisk, 1),
+        ['&', _, _] => (Ampersand, 1),
+        ['*', _, _] => (Asterisk, 1),
 
-            ['!', '=', _] => (Binary(Cmp(Ne)), 2),
-            ['!', _, _] => (Unary(LogicalNot), 1),
-            ['~', _, _] => (Unary(Complement), 1),
+        ['!', '=', _] => (Binary(Cmp(Ne)), 2),
+        ['!', _, _] => (Unary(LogicalNot), 1),
+        ['~', _, _] => (Unary(Complement), 1),
 
-            ['=', '=', '='] => (Assign(AssignStruct::from(RegularBinary(Cmp(Eq)))), 3),
-            ['=', '=', _] => (Binary(Cmp(Eq)), 2),
+        ['=', '=', '='] => (Assign(AssignStruct::from(RegularBinary(Cmp(Eq)))), 3),
+        ['=', '=', _] => (Binary(Cmp(Eq)), 2),
 
-            ['=', _, _] => {
-                if let Some(
-                    (rich_bin_op, rich_bin_op_len)
-                ) = parse_assign_binary_operator(&s[1..]) {
-                    (Assign(AssignStruct::from(rich_bin_op)), 1 + rich_bin_op_len)
-                } else {
-                    (Assign(AssignStruct::from(None)), 1)
-                }
-            }
-
-            _ => {
-                if let Some(
-                    (rich_bin_op, rich_bin_op_len)
-                ) = parse_assign_binary_operator(s) {
-                    if let RegularBinary(bin_op) = rich_bin_op {
-                        (Binary(bin_op), rich_bin_op_len)
-                    } else {
-                        return None;
-                    }
-                } else {
-                    return None;
-                }
+        ['=', _, _] => {
+            if let Some((rich_bin_op, rich_bin_op_len)) = parse_assign_binary_operator(&s[1..]) {
+                (Assign(AssignStruct::from(rich_bin_op)), 1 + rich_bin_op_len)
+            } else {
+                (Assign(AssignStruct::from(None)), 1)
             }
         }
-    );
+
+        _ => {
+            if let Some((RegularBinary(bin_op), rich_bin_op_len)) = parse_assign_binary_operator(s)
+            {
+                (Binary(bin_op), rich_bin_op_len)
+            } else {
+                return None;
+            }
+        }
+    });
 }
 
 pub(crate) fn char_to_u64(char: &str) -> u64 {
@@ -137,8 +126,9 @@ impl Tokenizer<'_> {
             fn get_closing_literal(&self) -> &'static str {
                 match self {
                     CommentOrCharOrString::Comment => "*/",
-                    CommentOrCharOrString::Char | CommentOrCharOrString::String =>
-                        self.get_opening_literal(),
+                    CommentOrCharOrString::Char | CommentOrCharOrString::String => {
+                        self.get_opening_literal()
+                    }
                 }
             }
         }
@@ -151,7 +141,8 @@ impl Tokenizer<'_> {
                 return None;
             }
 
-            let res = s.chars()
+            let res = s
+                .chars()
                 .into_iter()
                 .take_while(|c| c.is_ascii_alphanumeric() || ['_', '.'].contains(c))
                 .collect();
@@ -159,10 +150,11 @@ impl Tokenizer<'_> {
             Some(res)
         }
 
-        let comment_or_char_or_string_variants =
-            vec![CommentOrCharOrString::Comment,
-                 CommentOrCharOrString::Char,
-                 CommentOrCharOrString::String];
+        let comment_or_char_or_string_variants = vec![
+            CommentOrCharOrString::Comment,
+            CommentOrCharOrString::Char,
+            CommentOrCharOrString::String,
+        ];
 
         while i < source_code.len() {
             let token_pos = TokenPos::from((line_no, i - curr_line_started_at + 1));
@@ -178,21 +170,21 @@ impl Tokenizer<'_> {
                 if source_code[i..].starts_with(closing_literal) {
                     if *curr_reading != CommentOrCharOrString::Comment {
                         res.push(Token {
-                            token: WrappedToken::Constant(
-                                match curr_reading {
-                                    CommentOrCharOrString::String =>
-                                        Constant::String(buffer.take()),
+                            token: WrappedToken::Constant(match curr_reading {
+                                CommentOrCharOrString::String => Constant::String(buffer.take()),
 
-                                    CommentOrCharOrString::Char => {
-                                        let char = buffer.take();
-                                        if char.len() > self.compiler_options
-                                            .target_platform.arch.word_size() as usize {
-                                            issues.push(Issue::LiteralTooLong(pos))
-                                        }
-                                        Constant::Number(char_to_u64(&char))
+                                CommentOrCharOrString::Char => {
+                                    let char = buffer.take();
+                                    if char.len()
+                                        > self.compiler_options.target_platform.arch.word_size()
+                                            as usize
+                                    {
+                                        issues.push(Issue::LiteralTooLong(pos))
                                     }
-                                    _ => unreachable!(),
-                                }),
+                                    Constant::Number(char_to_u64(&char))
+                                }
+                                _ => unreachable!(),
+                            }),
                             pos,
                         });
                     }
@@ -237,7 +229,8 @@ impl Tokenizer<'_> {
                     if name_len > 0 {
                         if let Some(keyword) = self.reserved_symbols.get(&name) {
                             if *keyword == ReservedName::CtrlStmt(CtrlStmtIdent::Continue)
-                                && !self.compiler_options.continue_is_enabled {
+                                && !self.compiler_options.continue_is_enabled
+                            {
                                 res.push(Token {
                                     token: WrappedToken::Name(name),
                                     pos: token_pos,
@@ -273,23 +266,22 @@ impl Tokenizer<'_> {
                         pos: token_pos,
                     }),
                     '0'..='9' => {
-                        let number_as_str: String = source_code[i..].chars()
+                        let number_as_str: String = source_code[i..]
+                            .chars()
                             .into_iter()
                             .take_while(|c| c.is_ascii_digit())
                             .collect();
                         let number_len = number_as_str.len();
 
                         let radix = if curr_char == '0' { 8 } else { 10 };
-                        let val = u64::from_str_radix(&number_as_str, radix)
-                            .unwrap_or_else(|_| {
-                                issues.push(Issue::LiteralTooLong(token_pos));
-                                0
-                            });
-                        res.push(
-                            Token {
-                                token: WrappedToken::Constant(Constant::Number(val)),
-                                pos: token_pos,
-                            });
+                        let val = u64::from_str_radix(&number_as_str, radix).unwrap_or_else(|_| {
+                            issues.push(Issue::LiteralTooLong(token_pos));
+                            0
+                        });
+                        res.push(Token {
+                            token: WrappedToken::Constant(Constant::Number(val)),
+                            pos: token_pos,
+                        });
                         i += number_len;
                         continue;
                     }
@@ -297,11 +289,10 @@ impl Tokenizer<'_> {
                         token: WrappedToken::QuestionMark,
                         pos: token_pos,
                     }),
-                    '[' | ']' | '(' | ')' | '{' | '}' =>
-                        res.push(Token {
-                            token: WrappedToken::Bracket(Bracket::from_char_unchecked(curr_char)),
-                            pos: token_pos,
-                        }),
+                    '[' | ']' | '(' | ')' | '{' | '}' => res.push(Token {
+                        token: WrappedToken::Bracket(Bracket::from_char_unchecked(curr_char)),
+                        pos: token_pos,
+                    }),
                     _ => {
                         if let Some((op, tokens_read)) = parse_operator(&source_code[i..]) {
                             res.push(Token {
@@ -312,8 +303,10 @@ impl Tokenizer<'_> {
                             i += tokens_read;
                             continue;
                         } else {
-                            return Err(format!("{}: unknown character encountered: {}",
-                                               token_pos, curr_char as char));
+                            return Err(format!(
+                                "{}: unknown character encountered: {}",
+                                token_pos, curr_char as char
+                            ));
                         }
                     }
                 }
@@ -323,8 +316,10 @@ impl Tokenizer<'_> {
         }
         if let Some((currently_reading, opening_literal_pos)) = currently_reading {
             let closing_literal = currently_reading.get_closing_literal();
-            return Err(format!("expected {} (opening literal found in {}), found end of file",
-                               closing_literal, opening_literal_pos), );
+            return Err(format!(
+                "expected {} (opening literal found in {}), found end of file",
+                closing_literal, opening_literal_pos
+            ));
         }
         Ok(res)
     }
@@ -334,6 +329,6 @@ impl Tokenizer<'_> {
         source_code: &str,
         issues: &mut Vec<Issue>,
     ) -> Result<Vec<Token>, String> {
-        Ok(self.tokenize(&source_code, issues)?)
+        self.tokenize(source_code, issues)
     }
 }

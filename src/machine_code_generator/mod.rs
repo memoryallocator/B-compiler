@@ -1,17 +1,17 @@
-mod std_win_64;
 mod std_linux_64;
+mod std_win_64;
 
-use std::*;
-use collections::{HashMap, HashSet};
 use cmp::min;
+use collections::{HashMap, HashSet};
+use std::*;
 
-use crate::intermediate_code_generator;
-use intermediate_code_generator::*;
 use crate::config::*;
+use crate::intermediate_code_generator;
 use crate::parser::ast::IncDecType;
 use crate::tokenizer;
+use intermediate_code_generator::*;
 use tokenizer::char_to_u64;
-use tokenizer::token::{IncOrDec, BinaryRelation, LeftOrRight};
+use tokenizer::token::{BinaryRelation, IncOrDec, LeftOrRight};
 
 pub(crate) struct MachineCodeGenerator<'a> {
     pub(crate) compiler_options: CompilerOptions,
@@ -39,7 +39,7 @@ fn pooled_str_label(idx: u64) -> String {
     format!("sp!{}", idx.to_string())
 }
 
-const START: &'static str = "start!";
+const START: &str = "start!";
 
 fn pooled_str_end(idx: u64) -> String {
     format!("s!{}.end", idx.to_string())
@@ -47,34 +47,22 @@ fn pooled_str_end(idx: u64) -> String {
 
 fn readonly_section_or_segment(target: TargetPlatform) -> &'static str {
     match target {
-        WIN_64 => {
-            "section '.rodata' readable"
-        }
-        LINUX_64 => {
-            "segment readable"
-        }
+        WIN_64 => "section '.rodata' readable",
+        LINUX_64 => "segment readable",
     }
 }
 
 fn readable_writable_section_or_segment(target: TargetPlatform) -> &'static str {
     match target {
-        WIN_64 => {
-            "section '.data' readable writeable"
-        }
-        LINUX_64 => {
-            "segment readable writeable"
-        }
+        WIN_64 => "section '.data' readable writeable",
+        LINUX_64 => "segment readable writeable",
     }
 }
 
 fn executable_section_or_segment(target: TargetPlatform) -> &'static str {
     match target {
-        WIN_64 => {
-            "section '.text' executable"
-        }
-        LINUX_64 => {
-            "segment executable"
-        }
+        WIN_64 => "section '.text' executable",
+        LINUX_64 => "segment executable",
     }
 }
 
@@ -100,9 +88,7 @@ impl<'a> MachineCodeGenerator<'a> {
 
     pub(crate) fn run(self) -> Vec<String> {
         match self.compiler_options.target_platform.arch {
-            Arch::x86_64 => {
-                self.generate_x86_64()
-            }
+            Arch::x86_64 => self.generate_x86_64(),
         }
     }
 
@@ -128,12 +114,8 @@ impl<'a> MachineCodeGenerator<'a> {
         }
 
         res.extend(match target {
-            WIN_64 => {
-                std_win_64::generate_std_lib_and_internals()
-            }
-            LINUX_64 => {
-                std_linux_64::generate_std_lib_and_internals()
-            }
+            WIN_64 => std_win_64::generate_std_lib_and_internals(),
+            LINUX_64 => std_linux_64::generate_std_lib_and_internals(),
         });
         res
     }
@@ -143,7 +125,9 @@ impl<'a> MachineCodeGenerator<'a> {
         let word_size = self.compiler_options.target_platform.arch.word_size() as usize;
         let it = &mut s.chars();
         loop {
-            let mut char: String = it.take(word_size as usize).take_while(|x| *x as u32 != 4)
+            let mut char: String = it
+                .take(word_size as usize)
+                .take_while(|x| *x as u32 != 4)
                 .collect();
             if char.len() == word_size {
                 res.push(char_to_u64(&char));
@@ -161,7 +145,9 @@ impl<'a> MachineCodeGenerator<'a> {
     }
 
     fn get_lvalue_offset_in_bits(&self) -> u64 {
-        (self.compiler_options.target_platform.arch.word_size() as f64).log2().round() as u64
+        (self.compiler_options.target_platform.arch.word_size() as f64)
+            .log2()
+            .round() as u64
     }
 
     fn align_and_call(&self, nargs: u64) -> Vec<String> {
@@ -175,7 +161,8 @@ impl<'a> MachineCodeGenerator<'a> {
         let main_reg = call_conv.main_register;
         let reg_for_calls = call_conv.reg_for_calls;
         let word_size = self.compiler_options.target_platform.arch.word_size();
-        res.push(format!(r"
+        res.push(format!(
+            r"
                 mov {reg_for_calls}, rsp
                 and rsp, -{alignment}
                 i = 0
@@ -184,22 +171,34 @@ impl<'a> MachineCodeGenerator<'a> {
                     mov {supp}, [{reg_for_calls} + i*{word_size}]
                     mov [rsp + i*{word_size}], {supp}
                     i = i + 1
-                end while", supp = call_conv.supporting_registers[0],
-                         nargs = nargs,
-                         word_size = word_size,
-                         reg_for_calls = reg_for_calls,
-                         alignment = call_conv.alignment,
-                         param_reg_count = regs_for_args.len()));
+                end while",
+            supp = call_conv.supporting_registers[0],
+            nargs = nargs,
+            word_size = word_size,
+            reg_for_calls = reg_for_calls,
+            alignment = call_conv.alignment,
+            param_reg_count = regs_for_args.len()
+        ));
         if call_conv.use_shadow_space {
-            res.push(format!("sub rsp, {}", regs_for_args.len() * word_size as usize))
+            res.push(format!(
+                "sub rsp, {}",
+                regs_for_args.len() * word_size as usize
+            ))
         }
-        res.push(format!("rol {},{}", main_reg, self.get_lvalue_offset_in_bits()));
+        res.push(format!(
+            "rol {},{}",
+            main_reg,
+            self.get_lvalue_offset_in_bits()
+        ));
         res.push(format!("call {}", main_reg));
         res.push(format!("mov rsp, {}", reg_for_calls));
-        res.push(format!(r"
+        res.push(format!(
+            r"
                 if stack_var_count > 0
                     add rsp, {word_size}*stack_var_count
-                end if", word_size = word_size));
+                end if",
+            word_size = word_size
+        ));
         res
     }
 
@@ -220,8 +219,8 @@ impl<'a> MachineCodeGenerator<'a> {
             BinaryOp::Cmp(rel) => {
                 res.push(format!("cmp {},{}", supp_reg, main_reg));
                 let lower_byte = self.get_lower_byte_of_reg(main_reg);
-                let command =
-                    "set".to_owned() + match rel {
+                let command = "set".to_owned()
+                    + match rel {
                         BinaryRelation::Gt => "g",
                         BinaryRelation::Ne => "ne",
                         BinaryRelation::Eq => "e",
@@ -239,10 +238,8 @@ impl<'a> MachineCodeGenerator<'a> {
                 res.push(format!("idiv {}", supp_reg));
                 match bin_op {
                     BinaryOp::Div => (),
-                    BinaryOp::Mod => {
-                        res.push(format!("mov {},rdx", main_reg))
-                    }
-                    _ => unreachable!()
+                    BinaryOp::Mod => res.push(format!("mov {},rdx", main_reg)),
+                    _ => unreachable!(),
                 }
             }
 
@@ -272,15 +269,19 @@ impl<'a> MachineCodeGenerator<'a> {
             }
 
             b => {
-                res.push(match b {
-                    BinaryOp::Or => "or",
-                    BinaryOp::Xor => "xor",
-                    BinaryOp::Add => "add",
-                    BinaryOp::Sub => "sub",
-                    BinaryOp::Mul => "imul",
-                    BinaryOp::BitwiseAnd => "and",
-                    _ => unreachable!()
-                }.to_owned() + &format!(" {},{}", supp_reg, main_reg));
+                res.push(
+                    match b {
+                        BinaryOp::Or => "or",
+                        BinaryOp::Xor => "xor",
+                        BinaryOp::Add => "add",
+                        BinaryOp::Sub => "sub",
+                        BinaryOp::Mul => "imul",
+                        BinaryOp::BitwiseAnd => "and",
+                        _ => unreachable!(),
+                    }
+                    .to_owned()
+                        + &format!(" {},{}", supp_reg, main_reg),
+                );
                 res.push(format!("mov {},{}", main_reg, supp_reg));
             }
         }
@@ -302,13 +303,14 @@ impl<'a> MachineCodeGenerator<'a> {
 
         let mut args_passed_to_curr_fn = None;
 
-        let mut res =
-            match target {
-                LINUX_64 => vec!["format ELF64 executable 3".to_owned()],
-                WIN_64 => vec!["format PE64 console".to_owned(),
-                               format!("stack {},{0}", comp_opts.stack_size),
-                               format!("heap {},{0}", comp_opts.heap_size)],
-            };
+        let mut res = match target {
+            LINUX_64 => vec!["format ELF64 executable 3".to_owned()],
+            WIN_64 => vec![
+                "format PE64 console".to_owned(),
+                format!("stack {},{0}", comp_opts.stack_size),
+                format!("heap {},{0}", comp_opts.heap_size),
+            ],
+        };
         res.push(format!("entry {}", START));
 
         let mut user_defined = HashSet::new();
@@ -322,69 +324,81 @@ impl<'a> MachineCodeGenerator<'a> {
                             if use_shadow_space || *n >= regs_for_args_len {
                                 res.push(format!(
                                     "lea {main_reg},[{initial_rsp}+{word_size}*(2+1+{n})]",
-                                    main_reg = main_reg, initial_rsp = reg_for_initial_rsp,
-                                    n = if use_shadow_space { *n } else { n - regs_for_args_len },
-                                    word_size = word_size))
+                                    main_reg = main_reg,
+                                    initial_rsp = reg_for_initial_rsp,
+                                    n = if use_shadow_space {
+                                        *n
+                                    } else {
+                                        n - regs_for_args_len
+                                    },
+                                    word_size = word_size
+                                ))
                             } else {
                                 res.push(format!(
                                     "lea {main_reg},[{initial_rsp}-(1+{n})*{word_size}]",
                                     main_reg = main_reg,
                                     initial_rsp = reg_for_initial_rsp,
-                                    n = n, word_size = word_size))
+                                    n = n,
+                                    word_size = word_size
+                                ))
                             }
                         }
                         Lvalue::LocalVar(st) => {
                             res.push(format!(
                                 "lea {main},[{base}-({offset_in_words})*{word_sz}]",
-                                main = main_reg, word_sz = word_size,
+                                main = main_reg,
+                                word_sz = word_size,
                                 base = reg_for_initial_rsp,
-                                offset_in_words = 1 + match st {
-                                    StackRange::Exact(n) => n,
-                                    StackRange::Span(st) => st.end()
-                                } + if use_shadow_space { 0 } else {
-                                    min(args_passed_to_curr_fn.unwrap(), regs_for_args_len) as u64
-                                }));
+                                offset_in_words =
+                                    1 + match st {
+                                        StackRange::Exact(n) => n,
+                                        StackRange::Span(st) => st.end(),
+                                    } + if use_shadow_space {
+                                        0
+                                    } else {
+                                        min(args_passed_to_curr_fn.unwrap(), regs_for_args_len)
+                                            as u64
+                                    }
+                            ));
                         }
-                        Lvalue::Label(lbl) => {
+                        Lvalue::Label(lbl) => res.push(format!(
+                            "mov {},{}",
+                            main_reg,
                             match lbl {
-                                Label::Local(lbl) => {
-                                    res.push(format!("mov {},{}", main_reg, mangle_label(&lbl)))
-                                }
-                                Label::Global(lbl) => {
-                                    res.push(format!("mov {},{}", main_reg,
-                                                     mangle_global_def(&lbl)))
-                                }
-                                Label::PooledStr(str_no) => {
-                                    res.push(format!("mov {},{}", main_reg,
-                                                     pooled_str_label(*str_no)))
-                                }
+                                Label::Local(lbl) => mangle_label(lbl),
+                                Label::Global(lbl) => mangle_global_def(lbl),
+                                Label::PooledStr(str_no) => pooled_str_label(*str_no),
                             }
-                        }
+                        )),
                     }
-                    res.push(format!("ror {},{}", main_reg, self.get_lvalue_offset_in_bits()))
+                    res.push(format!(
+                        "ror {},{}",
+                        main_reg,
+                        self.get_lvalue_offset_in_bits()
+                    ))
                 }
                 WriteLvalue => {
                     let supp_reg = supp_regs[0];
                     res.push(format!("pop {}", supp_reg));
-                    res.push(format!("rol {},{}", supp_reg, self.get_lvalue_offset_in_bits()));
+                    res.push(format!(
+                        "rol {},{}",
+                        supp_reg,
+                        self.get_lvalue_offset_in_bits()
+                    ));
                     res.push(format!("mov [{}],{}", supp_reg, main_reg));
                 }
-                LoadConstant(constant) => {
-                    res.push(format!("mov {},{}", main_reg, constant))
-                }
+                LoadConstant(constant) => res.push(format!("mov {},{}", main_reg, constant)),
                 Deref => {
-                    res.push(format!("rol {},{}", main_reg, self.get_lvalue_offset_in_bits()));
+                    res.push(format!(
+                        "rol {},{}",
+                        main_reg,
+                        self.get_lvalue_offset_in_bits()
+                    ));
                     res.push(format!("mov {},[{0}]", main_reg));
                 }
-                DeclLabel(lbl) => {
-                    res.push(format!("{}:", mangle_label(&lbl)))
-                }
-                InternalLabel(lbl_id) => {
-                    res.push(format!("{}:", internal_label(*lbl_id)))
-                }
-                Jump(lbl_id) => {
-                    res.push(format!("jmp {}", internal_label(*lbl_id)))
-                }
+                DeclLabel(lbl) => res.push(format!("{}:", mangle_label(lbl))),
+                InternalLabel(lbl_id) => res.push(format!("{}:", internal_label(*lbl_id))),
+                Jump(lbl_id) => res.push(format!("jmp {}", internal_label(*lbl_id))),
                 CaseJmpIfEq { case_val, label_no } => {
                     res.push(format!("cmp {},{}", main_reg, case_val));
                     res.push(format!("je {}", internal_label(*label_no)))
@@ -393,15 +407,17 @@ impl<'a> MachineCodeGenerator<'a> {
                     res.push(format!("test {},{0}", main_reg));
                     res.push(format!("jz {}", internal_label(*lbl_id)));
                 }
-                Save => {
-                    res.push(format!("push {}", main_reg))
-                }
+                Save => res.push(format!("push {}", main_reg)),
 
                 LvUnary(un) => {
-                    res.push(format!("rol {},{}", main_reg, self.get_lvalue_offset_in_bits()));
+                    res.push(format!(
+                        "rol {},{}",
+                        main_reg,
+                        self.get_lvalue_offset_in_bits()
+                    ));
                     let inc_or_dec = match un.inc_or_dec {
                         IncOrDec::Increment => "inc",
-                        IncOrDec::Decrement => "dec"
+                        IncOrDec::Decrement => "dec",
                     };
                     let (supp_reg, prev_val_reg) = (supp_regs[0], supp_regs[1]);
 
@@ -411,32 +427,32 @@ impl<'a> MachineCodeGenerator<'a> {
                     }
                     res.push(format!("{} {}", inc_or_dec, supp_reg));
                     res.push(format!("mov [{}],{}", main_reg, supp_reg));
-                    res.push(format!("mov {},{}", main_reg, match un.inc_dec_type {
-                        IncDecType::Postfix => prev_val_reg,
-                        IncDecType::Prefix => supp_reg
-                    }));
+                    res.push(format!(
+                        "mov {},{}",
+                        main_reg,
+                        match un.inc_dec_type {
+                            IncDecType::Postfix => prev_val_reg,
+                            IncDecType::Prefix => supp_reg,
+                        }
+                    ));
                 }
-                RvUnary(un) => {
-                    match un {
-                        RvalueUnary::Minus => {
-                            res.push(format!("neg {}", main_reg))
-                        }
-                        RvalueUnary::Complement => {
-                            res.push(format!("not {}", main_reg))
-                        }
-                        RvalueUnary::LogicalNot => {
-                            res.push(format!("test {},{0}", main_reg));
-                            let lower_byte = self.get_lower_byte_of_reg(main_reg);
-                            res.push(format!("setz {}", lower_byte));
-                            res.push(format!("movzx {},{}", main_reg, lower_byte));
-                        }
+                RvUnary(un) => match un {
+                    RvalueUnary::Minus => res.push(format!("neg {}", main_reg)),
+                    RvalueUnary::Complement => res.push(format!("not {}", main_reg)),
+                    RvalueUnary::LogicalNot => {
+                        res.push(format!("test {},{0}", main_reg));
+                        let lower_byte = self.get_lower_byte_of_reg(main_reg);
+                        res.push(format!("setz {}", lower_byte));
+                        res.push(format!("movzx {},{}", main_reg, lower_byte));
                     }
-                }
-                Call { nargs } => {
-                    res.extend(self.align_and_call(*nargs + 1))
-                }
+                },
+                Call { nargs } => res.extend(self.align_and_call(*nargs + 1)),
                 Goto => {
-                    res.push(format!("rol {},{}", main_reg, self.get_lvalue_offset_in_bits()));
+                    res.push(format!(
+                        "rol {},{}",
+                        main_reg,
+                        self.get_lvalue_offset_in_bits()
+                    ));
                     res.push(format!("jmp {}", main_reg));
                 }
                 Ret => {
@@ -448,7 +464,7 @@ impl<'a> MachineCodeGenerator<'a> {
 
                 FnDef(name, info) => {
                     res.push(executable_section_or_segment(target).to_owned());
-                    res.push(format!("{}:", mangle_global_def(&name)));
+                    res.push(format!("{}:", mangle_global_def(name)));
 
                     res.push(format!("push {}", reg_for_calls));
                     res.push(format!("push {}", reg_for_initial_rsp));
@@ -460,19 +476,28 @@ impl<'a> MachineCodeGenerator<'a> {
                     let num_of_args_to_save = min(regs_for_args.len() as u64, args_to_curr_fn);
                     args_passed_to_curr_fn = Some(args_to_curr_fn);
 
-                    let words_needed =
-                        info.stack_size + if use_shadow_space { 0 } else { num_of_args_to_save };
+                    let words_needed = info.stack_size
+                        + if use_shadow_space {
+                            0
+                        } else {
+                            num_of_args_to_save
+                        };
                     if words_needed != 0 {
                         res.push(format!("sub rsp,{}*{}", words_needed, word_size));
                     }
 
                     for (i, reg) in regs_for_args[..num_of_args_to_save as usize]
-                        .iter().enumerate() {
+                        .iter()
+                        .enumerate()
+                    {
                         res.push(format!("i = {}", i));
                         res.push(format!(
                             "mov [{base}+{word_size}*({offset})],{reg}",
                             offset = if use_shadow_space { "2+1+i" } else { "-(1+i)" },
-                            reg = reg, word_size = word_size, base = reg_for_initial_rsp));
+                            reg = reg,
+                            word_size = word_size,
+                            base = reg_for_initial_rsp
+                        ));
                     }
                 }
                 VarOrVecDef(name) => {
@@ -480,37 +505,28 @@ impl<'a> MachineCodeGenerator<'a> {
                     res.push(format!("{}:", mangle_global_def(name)));
                     user_defined.insert(name.as_str());
                 }
-                Ival(iv) => {
-                    match iv {
-                        intermediate_code_generator::Ival::Number(x) => {
-                            res.push(format!("{} {}", declare_word_directive(word_size), x))
-                        }
-                        intermediate_code_generator::Ival::ReserveWords(n) => {
-                            res.push(format!("{} {} dup ?", declare_word_directive(word_size), n))
-                        }
-                        intermediate_code_generator::Ival::Name(lbl) => {
-                            match lbl {
-                                Label::Local(_) => unreachable!(),
-                                Label::Global(name) => {
-                                    res.push(format!("dq {}", mangle_global_def(name)))
-                                }
-                                Label::PooledStr(s) => {
-                                    res.push(format!("dq {}", pooled_str_label(*s)))
-                                }
-                            }
-                        }
+                Ival(iv) => match iv {
+                    intermediate_code_generator::Ival::Number(x) => {
+                        res.push(format!("{} {}", declare_word_directive(word_size), x))
                     }
-                }
-                BinOp(bin_op) => {
-                    res.extend(self.bin_op_to_machine_code(*bin_op))
-                }
+                    intermediate_code_generator::Ival::ReserveWords(n) => {
+                        res.push(format!("{} {} dup ?", declare_word_directive(word_size), n))
+                    }
+                    intermediate_code_generator::Ival::Name(lbl) => match lbl {
+                        Label::Local(_) => unreachable!(),
+                        Label::Global(name) => res.push(format!("dq {}", mangle_global_def(name))),
+                        Label::PooledStr(s) => res.push(format!("dq {}", pooled_str_label(*s))),
+                    },
+                },
+                BinOp(bin_op) => res.extend(self.bin_op_to_machine_code(*bin_op)),
             }
         }
         if !self.pooled_strings.is_empty() {
             res.push(readonly_section_or_segment(target).to_owned());
             for (s, n) in &self.pooled_strings {
                 res.push(format!("{}:", pooled_str_label(*n)));
-                let s_as_words = self.pack_string_and_append_eot(s)
+                let s_as_words = self
+                    .pack_string_and_append_eot(s)
                     .into_iter()
                     .map(|x| x.to_string())
                     .collect::<Vec<String>>()
@@ -521,7 +537,8 @@ impl<'a> MachineCodeGenerator<'a> {
         }
         res.extend(self.generate_std_lib_and_internals(user_defined));
         if self.compiler_options.target_platform == WIN_64 {
-            res.push(r"
+            res.push(
+                r"
                 section '.idata' import data readable writeable
 
                 dd 0,0,0,RVA kernel_name,RVA kernel_table
@@ -555,12 +572,18 @@ impl<'a> MachineCodeGenerator<'a> {
                 _WriteFile dw 0
                     db 'WriteFile',0
                 _GetCommandLineA dw 0
-                    db 'GetCommandLineA',0".to_owned())
+                    db 'GetCommandLineA',0"
+                    .to_owned(),
+            )
         }
         res.into_iter().fold(vec![], |mut acc, x| {
             acc.extend(x.split('\n').filter_map(|x| {
                 let x = x.trim().to_owned();
-                if !x.is_empty() { Some(x) } else { None }
+                if !x.is_empty() {
+                    Some(x)
+                } else {
+                    None
+                }
             }));
             acc
         })

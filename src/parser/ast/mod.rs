@@ -1,11 +1,8 @@
 pub(crate) mod flat_ast;
 
-use std::*;
-use convert::TryFrom;
-
+use crate::config::Issue;
 use crate::tokenizer::token;
 use token::*;
-use crate::config::Issue;
 
 #[derive(Debug)]
 pub(crate) enum Ival {
@@ -89,7 +86,10 @@ pub(crate) struct LabelDeclarationNode {
 pub(crate) enum Lvalue {
     Name(String),
     DerefRvalue(RvalueNode),
-    Indexing { vector: RvalueNode, index: RvalueNode },
+    Indexing {
+        vector: RvalueNode,
+        index: RvalueNode,
+    },
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -141,11 +141,19 @@ pub(crate) struct FunctionCallNode {
 pub(crate) enum Rvalue {
     Constant(ConstantNode),
     Lvalue(LvalueNode),
-    Assign { lhs: LvalueNode, assign: token::Assign, rhs: RvalueNode },
+    Assign {
+        lhs: LvalueNode,
+        assign: token::Assign,
+        rhs: RvalueNode,
+    },
     IncDec(IncDecNode),
     Unary(Unary, RvalueNode),
     TakeAddress(LvalueNode),
-    Binary { lhs: RvalueNode, bin_op: token::RichBinaryOperation, rhs: RvalueNode },
+    Binary {
+        lhs: RvalueNode,
+        bin_op: token::RichBinaryOperation,
+        rhs: RvalueNode,
+    },
     ConditionalExpression {
         condition: RvalueNode,
         on_true: RvalueNode,
@@ -165,13 +173,18 @@ pub(crate) struct RvalueNode {
 impl RvalueNode {
     pub(crate) fn into_truth_value(self) -> Self {
         if let Rvalue::Binary {
-            bin_op: RichBinaryOperation::BitwiseAnd, lhs, rhs
-        } = *self.rvalue {
+            bin_op: RichBinaryOperation::BitwiseAnd,
+            lhs,
+            rhs,
+        } = *self.rvalue
+        {
             return Self {
                 position: self.position,
-                rvalue: Box::new(
-                    Rvalue::Binary { lhs, bin_op: RichBinaryOperation::LogicalAnd, rhs }
-                ),
+                rvalue: Box::new(Rvalue::Binary {
+                    lhs,
+                    bin_op: RichBinaryOperation::LogicalAnd,
+                    rhs,
+                }),
             };
         };
         self
@@ -238,14 +251,14 @@ pub(crate) struct ContinueNode {}
 
 #[derive(Debug)]
 pub(crate) enum DeclarationNode {
-    AutoDeclaration(AutoDeclarationNode),
-    ExternDeclaration(ExternDeclarationNode),
-    LabelDeclaration(LabelDeclarationNode),
+    Auto(AutoDeclarationNode),
+    Extern(ExternDeclarationNode),
+    Label(LabelDeclarationNode),
 }
 
 #[derive(Debug)]
 pub(crate) enum Statement {
-    NullStatement,
+    Null,
     Compound(CompoundStatementNode),
     Declaration(DeclarationNode),
     Return(ReturnNode),
