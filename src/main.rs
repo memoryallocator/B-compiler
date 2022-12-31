@@ -1,32 +1,10 @@
-use io::Write;
-use process::exit;
-use std::*;
+use std::fs::File;
+use std::io::Write;
+use std::io::Error as IoError;
+use std::process::ExitCode;
+use std::process::exit;
 
-use crate::config::*;
-
-mod config;
-mod intermediate_code_generator;
-mod machine_code_generator;
-mod parser;
-mod tokenizer;
-
-fn write_to_file_and_exit(data: Vec<String>, file: &str) -> ! {
-    let ok: Result<(), io::Error> = (|| {
-        let mut file = fs::File::create(file)?;
-        file.write_all(data.join("\n").as_bytes())?;
-        exit(0);
-    })();
-    if let Err(err) = ok {
-        eprintln!("Something went wrong writing the output file: {}", err);
-        eprintln!("\n\n\n");
-        for line in data {
-            println!("{}", line)
-        }
-        exit(1);
-    } else {
-        unreachable!()
-    }
-}
+use anyhow::{Error, Result};
 
 fn parse_command_line_arguments() -> Result<(String, CompilerOptions, String), String> {
     let args: Vec<String> = env::args().collect();
@@ -116,84 +94,91 @@ fn parse_command_line_arguments() -> Result<(String, CompilerOptions, String), S
     }
 }
 
-fn main() {
-    let (filename, compiler_options, output_file) =
-        parse_command_line_arguments().unwrap_or_else(|err| {
-            eprintln!("Something went wrong parsing arguments: {}", err);
-            process::exit(1);
-        });
+// fn main() -> Result<String, Error> {
+//     // file.write_all(data.join("\n").as_bytes())?;
 
-    let source_code = fs::read_to_string(filename).unwrap_or_else(|err| {
-        eprintln!("Something went wrong reading the file: {}", err);
-        process::exit(1);
-    });
+//     let (filename, compiler_options, output_file) =
+//         parse_command_line_arguments().unwrap_or_else(|err| {
+//             eprintln!("Something went wrong parsing arguments: {}", err);
+//             exit(1);
+//         });
 
-    if !source_code.chars().all(|c| c.is_ascii()) {
-        eprintln!("The source code file must be in ASCII");
-        process::exit(1)
-    }
+//     let source_code = fs::read_to_string(filename).unwrap_or_else(|err| {
+//         eprintln!("Something went wrong reading the file: {}", err);
+//         exit(1);
+//     });
 
-    let processor = tokenizer::Tokenizer {
-        escape_sequences: &get_escape_sequences(),
-        reserved_symbols: &get_reserved_symbols(),
-        compiler_options,
-    };
+//     if !source_code.chars().all(|c| c.is_ascii()) {
+//         eprintln!("The source code file must be in ASCII");
+//         exit(1)
+//     }
 
-    let mut issues = vec![];
-    let tokens = processor.run(&source_code, &mut issues);
-    let tokens = tokens.unwrap_or_else(|err| {
-        eprintln!("Lexical analyzer returned an error: {}", err);
-        process::exit(1);
-    });
+//     let processor = tokenizer::Tokenizer {
+//         escape_sequences: &get_escape_sequences(),
+//         reserved_symbols: &get_reserved_symbols(),
+//         compiler_options,
+//     };
 
-    let processor = parser::Parser {
-        compiler_options,
-        source_code: &source_code,
-    };
+//     let mut issues = vec![];
+//     let tokens = processor.run(&source_code, &mut issues);
+//     let tokens = tokens.unwrap_or_else(|err| {
+//         eprintln!("Lexical analyzer returned an error: {}", err);
+//         exit(1);
+//     });
 
-    let ast_to_scopes_mapping = processor.run(&tokens, &mut issues);
-    let mut at_least_1_error = false;
-    for issue in issues {
-        use Issue::*;
-        let error = !matches!(
-            issue,
-            VecWithNoSizeAndIvals(..)
-                | VecTooManyIvals { .. }
-                | DeclShadowsGlobalDef { .. }
-                | UnnecessaryImport { .. }
-                | DeclShadowsFnParameter { .. }
-                | DeclShadowsPrevious { .. }
-                | InvalidParameterCount { .. }
-        );
-        eprintln!("{}: {}", if error { "error" } else { "warning" }, issue);
-        at_least_1_error |= error;
-    }
-    if at_least_1_error {
-        println!("There were more than 0 errors. Terminating");
-        process::exit(1);
-    }
-    let scope_table = ast_to_scopes_mapping.unwrap();
+//     let processor = parser::Parser {
+//         compiler_options,
+//         source_code: &source_code,
+//     };
 
-    let mut processor = intermediate_code_generator::IntermediateCodeGenerator::new(
-        compiler_options,
-        &scope_table.global,
-    );
-    let (intermediate_code, pooled_strings) = processor.run(&scope_table);
+//     let ast_to_scopes_mapping = processor.run(&tokens, &mut issues);
+//     let mut at_least_1_error = false;
+//     for issue in issues {
+//         use Issue::*;
+//         let error = !matches!(
+//             issue,
+//             VecWithNoSizeAndIvals(..)
+//                 | VecTooManyIvals { .. }
+//                 | DeclShadowsGlobalDef { .. }
+//                 | UnnecessaryImport { .. }
+//                 | DeclShadowsFnParameter { .. }
+//                 | DeclShadowsPrevious { .. }
+//                 | InvalidParameterCount { .. }
+//         );
+//         eprintln!("{}: {}", if error { "error" } else { "warning" }, issue);
+//         at_least_1_error |= error;
+//     }
+//     if at_least_1_error {
+//         println!("There were more than 0 errors. Terminating");
+//         exit(1);
+//     }
+//     let scope_table = ast_to_scopes_mapping.unwrap();
 
-    if compiler_options.mode == Mode::Ir {
-        write_to_file_and_exit(
-            intermediate_code
-                .into_iter()
-                .map(|x| format!("{:?}", x))
-                .collect(),
-            &output_file,
-        )
-    }
-    let processor = machine_code_generator::MachineCodeGenerator::new(
-        compiler_options,
-        &intermediate_code,
-        pooled_strings,
-    );
-    let res = processor.run();
-    write_to_file_and_exit(res, &output_file);
-}
+//     let mut processor = intermediate_code_generator::IntermediateCodeGenerator::new(
+//         compiler_options,
+//         &scope_table.global,
+//     );
+//     let (intermediate_code, pooled_strings) = processor.run(&scope_table);
+
+//     if compiler_options.mode == Mode::Ir {
+//         write_to_file_and_exit(
+//             intermediate_code
+//                 .into_iter()
+//                 .map(|x| format!("{:?}", x))
+//                 .collect(),
+//             &output_file,
+//         )
+//     }
+//     let processor = machine_code_generator::MachineCodeGenerator::new(
+//         compiler_options,
+//         &intermediate_code,
+//         pooled_strings,
+//     );
+//     let res = processor.run();
+//     write_to_file_and_exit(res, &output_file);
+// }
+
+// fn print_error_message_and_exit(msg: &str) {
+//     eprintln!("{msg}");
+//     ExitCode::FAILURE.
+// }
