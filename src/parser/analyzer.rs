@@ -1,15 +1,20 @@
-use cell::Cell;
-use collections::HashMap;
-use ops::Range;
-use std::*;
+use std::cell::Cell;
+use std::cmp::max;
+use std::collections::HashMap;
+use std::ops::Range;
 
+use crate::parser::ast;
 use crate::tokenizer::token;
-use token::{Constant, TokenPos};
+use crate::utils;
 
-use crate::config::*;
-use crate::parser;
-use parser::ast;
-use parser::ast::flat_ast::*;
+use ast::flat_ast::{
+    FlatDeclaration, FlatDeclarationNameInfo, FlatDefinition, FlatDefinitionInfo, FlatNode,
+    FlatNodeAndPos, Ival, NameOrConstant,
+};
+use ast::{Lvalue, LvalueNode, Rvalue, RvalueNode};
+use token::{Constant, TokenPos};
+use utils::get_standard_library_names;
+use utils::{FnDef, Issue, NumberOfParameters, StdNameInfo};
 
 #[derive(Debug, Clone)]
 pub(crate) enum ProcessedDeclInfo {
@@ -22,7 +27,7 @@ pub(crate) enum ProcessedDeclInfo {
 
 #[derive(Debug, Clone)]
 pub(crate) enum VarDefInfo {
-    StdVar { ival: i64 },
+    StdVar { _ival: i64 },
     UserVar { ival: Option<Ival> },
 }
 
@@ -34,13 +39,13 @@ pub(crate) enum DefInfo {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct DefInfoAndPos {
+pub struct DefInfoAndPos {
     pub(crate) pos_if_user_defined: Option<TokenPos>,
     pub(crate) info: DefInfo,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct DeclInfoAndPos {
+pub struct DeclInfoAndPos {
     pub(crate) pos: TokenPos,
     pub(crate) info: ProcessedDeclInfo,
 }
@@ -49,13 +54,13 @@ pub(crate) type LocalScope = HashMap<String, DeclInfoAndPos>;
 pub(crate) type GlobalDefinitions = HashMap<String, DefInfoAndPos>;
 
 #[derive(Debug)]
-pub(crate) struct ScopeTable {
-    pub(crate) global: GlobalDefinitions,
+pub struct ScopeTable {
+    pub global: GlobalDefinitions,
     pub(crate) local: Vec<(FlatNodeAndPos, LocalScope)>,
 }
 
 pub(crate) struct Analyzer<'a> {
-    pub(crate) source_code: &'a str,
+    pub(crate) _source_code: &'a str,
     global_scope: Cell<GlobalDefinitions>,
 }
 
@@ -92,7 +97,7 @@ where
 impl<'a> Analyzer<'a> {
     pub(crate) fn new(source_code: &'a str) -> Self {
         Analyzer {
-            source_code,
+            _source_code: source_code,
             global_scope: Default::default(),
         }
     }
@@ -106,7 +111,6 @@ impl<'a> Analyzer<'a> {
         block_starts_at: TokenPos,
         issues: &mut Vec<Issue>,
     ) {
-        use Issue::*;
         let name = &decl.name;
         enum ExplicitDeclType {
             Auto,
@@ -128,7 +132,7 @@ impl<'a> Analyzer<'a> {
                             Some(match s {
                                 Constant::Number(nmb) => *nmb,
                                 Constant::String(..) => {
-                                    issues.push(VecSizeIsNotANumber {
+                                    issues.push(Issue::VecSizeIsNotANumber {
                                         name: name.clone(),
                                         pos,
                                     });
@@ -143,7 +147,7 @@ impl<'a> Analyzer<'a> {
             }
             FlatDeclarationNameInfo::Extern => {
                 if global_def.is_none() {
-                    issues.push(ExternSymbolNotFound {
+                    issues.push(Issue::ExternSymbolNotFound {
                         name: name.clone(),
                         extern_pos: pos,
                     });
@@ -164,20 +168,23 @@ impl<'a> Analyzer<'a> {
 
         if let Some(global_def) = global_def {
             if let ExplicitDeclType::Auto | ExplicitDeclType::Label = explicit_decl_type {
-                issues.push(DeclShadowsGlobalDef {
+                issues.push(Issue::DeclShadowsGlobalDef {
                     decl: (name.clone(), decl_info_and_pos.clone()),
                     global_def: global_def.clone(),
                 })
             }
         }
         if let Some(prev_decl) = local_scope.insert(name.clone(), decl_info_and_pos.clone()) {
-            use ProcessedDeclInfo::*;
             match prev_decl.info {
-                ExplicitExtern(_) | AssumedExternFnCall(_) | Auto { .. } => {
+                ProcessedDeclInfo::ExplicitExtern(_)
+                | ProcessedDeclInfo::AssumedExternFnCall(_)
+                | ProcessedDeclInfo::Auto { .. } => {
                     let prev_decl_is_in_this_block = prev_decl.pos >= block_starts_at;
-                    if let AssumedExternFnCall(_) | ExplicitExtern(_) = prev_decl.info {
+                    if let ProcessedDeclInfo::AssumedExternFnCall(_)
+                    | ProcessedDeclInfo::ExplicitExtern(_) = prev_decl.info
+                    {
                         if let ExplicitDeclType::Extern = explicit_decl_type {
-                            issues.push(UnnecessaryImport {
+                            issues.push(Issue::UnnecessaryImport {
                                 curr_decl: (name.clone(), pos),
                                 prev_import_pos: prev_decl.pos,
                             });
@@ -185,26 +192,28 @@ impl<'a> Analyzer<'a> {
                         }
                     }
                     if prev_decl_is_in_this_block {
-                        issues.push(NameRedeclared {
+                        issues.push(Issue::NameRedeclared {
                             decl: (name.clone(), decl_info_and_pos),
                             prev_decl,
                         })
                     } else {
-                        issues.push(DeclShadowsPrevious {
+                        issues.push(Issue::DeclShadowsPrevious {
                             decl: (name.clone(), decl_info_and_pos),
                             prev_decl,
                         })
                     }
                 }
-                ProcessedDeclInfo::Label => issues.push(NameRedeclared {
+                ProcessedDeclInfo::Label => issues.push(Issue::NameRedeclared {
                     decl: (name.clone(), decl_info_and_pos),
                     prev_decl,
                 }),
-                ProcessedDeclInfo::FnParameter { .. } => issues.push(DeclShadowsFnParameter {
-                    param_pos: decl_info_and_pos.pos,
-                    decl: (name.clone(), decl_info_and_pos),
-                    fn_def: (curr_fn.0.to_string(), curr_fn.1),
-                }),
+                ProcessedDeclInfo::FnParameter { .. } => {
+                    issues.push(Issue::DeclShadowsFnParameter {
+                        param_pos: decl_info_and_pos.pos,
+                        decl: (name.clone(), decl_info_and_pos),
+                        fn_def: (curr_fn.0.to_string(), curr_fn.1),
+                    })
+                }
             }
         }
     }
@@ -220,10 +229,10 @@ impl<'a> Analyzer<'a> {
                         DefInfoAndPos {
                             pos_if_user_defined: None,
                             info: match info {
-                                StdNameInfo::Variable { ival } => {
-                                    DefInfo::Variable(VarDefInfo::StdVar { ival })
-                                }
                                 StdNameInfo::Function(fn_def) => DefInfo::Function(fn_def),
+                                StdNameInfo::Variable { ival } => {
+                                    DefInfo::Variable(VarDefInfo::StdVar { _ival: ival })
+                                }
                             },
                         },
                     )
@@ -289,12 +298,12 @@ impl<'a> Analyzer<'a> {
                                     specified_size_plus_1,
                                 })
                             }
-                            cmp::max(ivals_len, specified_size_plus_1)
+                            max(ivals_len, specified_size_plus_1)
                         } else {
                             if ivals_len == 0 {
                                 issues.push(Issue::VecWithNoSizeAndIvals(name.clone(), pos));
                             }
-                            cmp::max(ivals_len, 1)
+                            max(ivals_len, 1)
                         };
                         DefInfo::Vector {
                             size: actual_size.try_into().unwrap(),
@@ -328,12 +337,18 @@ impl<'a> Analyzer<'a> {
 
     fn process_lvalue<'b>(
         &self,
-        lv: &'b ast::LvalueNode,
+        lv: &'b LvalueNode,
         local_scope: &mut LocalScope,
         issues: &mut Vec<Issue>,
-    ) -> Vec<&'b ast::RvalueNode> {
+    ) -> Vec<&'b RvalueNode> {
         match &lv.lvalue {
-            ast::Lvalue::Name(name) => {
+            Lvalue::DerefRvalue(rv) => {
+                vec![rv]
+            }
+            Lvalue::Indexing { vector, index } => {
+                vec![vector, index]
+            }
+            Lvalue::Name(name) => {
                 let info = local_scope.get(name);
                 if info.is_none() {
                     // TODO: suggestions
@@ -344,38 +359,29 @@ impl<'a> Analyzer<'a> {
                 }
                 vec![]
             }
-            ast::Lvalue::DerefRvalue(rv) => {
-                vec![rv]
-            }
-            ast::Lvalue::Indexing { vector, index } => {
-                vec![vector, index]
-            }
         }
     }
 
     fn process_rvalue(
         &mut self,
-        rv: &ast::Rvalue,
+        rv: &Rvalue,
         local_scope: &mut LocalScope,
         issues: &mut Vec<Issue>,
     ) {
-        use ast::Rvalue::*;
-        use ast::*;
-
         let rvalues_to_process = match rv {
-            Constant(_) => vec![],
-            Lvalue(lv) => self.process_lvalue(lv, local_scope, issues),
-            Assign { lhs, rhs, .. } => {
+            Rvalue::Constant(_) => vec![],
+            Rvalue::Lvalue(lv) => self.process_lvalue(lv, local_scope, issues),
+            Rvalue::Assign { lhs, rhs, .. } => {
                 let mut rvs_to_pr = self.process_lvalue(lhs, local_scope, issues);
                 rvs_to_pr.push(rhs);
                 rvs_to_pr
             }
-            IncDec(node) => self.process_lvalue(&node.lvalue, local_scope, issues),
+            Rvalue::IncDec(node) => self.process_lvalue(&node.lvalue, local_scope, issues),
 
-            Unary(_, rv) => vec![rv],
-            TakeAddress(lv) => self.process_lvalue(lv, local_scope, issues),
-            Binary { lhs, rhs, .. } => vec![lhs, rhs],
-            ConditionalExpression {
+            Rvalue::Unary(_, rv) => vec![rv],
+            Rvalue::TakeAddress(lv) => self.process_lvalue(lv, local_scope, issues),
+            Rvalue::Binary { lhs, rhs, .. } => vec![lhs, rhs],
+            Rvalue::ConditionalExpression {
                 condition,
                 on_true,
                 on_false,
@@ -384,8 +390,8 @@ impl<'a> Analyzer<'a> {
                 vec![condition, on_true, on_false]
             }
 
-            BracketedExpression(expr) => vec![expr],
-            FunctionCall(fn_call) => {
+            Rvalue::BracketedExpression(expr) => vec![expr],
+            Rvalue::FunctionCall(fn_call) => {
                 let mut rvalue_to_process = vec![];
                 if let Rvalue::Lvalue(LvalueNode {
                     position,
@@ -469,9 +475,7 @@ impl<'a> Analyzer<'a> {
             .iter()
             .filter_map(|node| {
                 if let FlatNode::Decl(
-                    decl
-                    @
-                    FlatDeclaration {
+                    decl @ FlatDeclaration {
                         info: FlatDeclarationNameInfo::Label,
                         ..
                     },

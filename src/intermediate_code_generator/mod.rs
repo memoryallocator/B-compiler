@@ -1,41 +1,51 @@
-use cell::Cell;
-use cmp::max;
-use collections::HashMap;
-use ops::RangeInclusive;
-use std::*;
+use std::cell::Cell;
+use std::cmp::max;
+use std::collections::HashMap;
+use std::ops::RangeInclusive;
 
-use crate::config::CompilerOptions;
+use multimap::MultiMap;
+
 use crate::parser;
-use crate::tokenizer::token;
-use ast::flat_ast::*;
-use ast::{ConstantNode, FunctionCallNode, IncDecNode, IncDecType, Rvalue, Unary};
-use parser::analyzer::*;
+use crate::tokenizer::token::{
+    BinaryOperation, BinaryRelation, Constant, IncOrDec, LeftOrRight, RichBinaryOperation,
+};
+use crate::utils::CompilerOptions;
+
+use analyzer::get_fns_ranges;
+use analyzer::{DefInfo, GlobalDefinitions, LocalScope, ProcessedDeclInfo, ScopeTable, VarDefInfo};
+use ast::flat_ast::{
+    FlatDeclarationNameInfo, FlatDefinition, FlatDefinitionInfo, FlatNode, FlatNodeAndPos,
+    NameOrConstant,
+};
+use ast::{
+    ConstantNode, FunctionCallNode, IncDecNode, IncDecType, Lvalue as AstLvalue, Rvalue, Unary,
+};
+use parser::analyzer;
 use parser::ast;
-use parser::{MultiMap, ScopeTable};
-use token::*;
+use parser::{DeclInfoAndPos, DefInfoAndPos};
 
 #[derive(Debug)]
-pub(crate) enum Ival {
+pub enum Ival {
     Name(Label),
     Number(u64),
     ReserveWords(u64),
 }
 
 #[derive(Debug)]
-pub(crate) struct FnInfo {
+pub struct FnInfo {
     pub(crate) stack_size: u64,
     pub(crate) num_of_params: u64,
 }
 
 #[derive(Debug)]
-pub(crate) enum Label {
+pub enum Label {
     Local(String),
     Global(String),
     PooledStr(u64),
 }
 
 #[derive(Debug)]
-pub(crate) enum Lvalue {
+pub enum Lvalue {
     NthArg(u64),
     LocalVar(StackRange),
     Label(Label),
@@ -69,20 +79,20 @@ enum StmtRequiringEndMarker<'a> {
 }
 
 #[derive(Debug)]
-pub(crate) struct IncDec {
+pub struct IncDec {
     pub(crate) inc_or_dec: IncOrDec,
     pub(crate) inc_dec_type: IncDecType,
 }
 
 #[derive(Debug)]
-pub(crate) enum RvalueUnary {
+pub enum RvalueUnary {
     LogicalNot,
     Minus,
     Complement,
 }
 
 #[derive(Debug, Copy, Clone)]
-pub(crate) enum BinaryOp {
+pub enum BinaryOp {
     Div,
     Mod,
     Or,
@@ -118,7 +128,7 @@ impl From<RichBinaryOperation> for BinaryOp {
 }
 
 #[derive(Debug)]
-pub(crate) enum IntermRepr {
+pub enum IntermRepr {
     FnDef(String, FnInfo),
     VarOrVecDef(String),
     Ival(Ival),
@@ -140,8 +150,8 @@ pub(crate) enum IntermRepr {
     Ret,
 }
 
-pub(crate) struct IntermediateCodeGenerator<'a> {
-    pub(crate) compiler_options: CompilerOptions,
+pub struct IntermediateCodeGenerator<'a> {
+    pub(crate) compiler_options: &'a CompilerOptions,
     label_counter: RangeInclusive<u64>,
     str_pool: Cell<HashMap<String, u64>>,
     global_definitions: &'a GlobalDefinitions,
@@ -155,22 +165,26 @@ pub(crate) struct IntermediateCodeGenerator<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum StackRange {
+pub enum StackRange {
     Exact(u64),
     Span(RangeInclusive<u64>),
 }
 
 fn is_regular_node(node: &FlatNode) -> bool {
-    use FlatNode::*;
     !matches!(
         node,
-        Compound | If(_) | While(_) | Switch(_) | Def(_) | EndOfStmt { .. },
+        FlatNode::Compound
+            | FlatNode::If(_)
+            | FlatNode::While(_)
+            | FlatNode::Switch(_)
+            | FlatNode::Def(_)
+            | FlatNode::EndOfStmt { .. },
     )
 }
 
 impl<'a> IntermediateCodeGenerator<'a> {
-    pub(crate) fn new(
-        compiler_options: CompilerOptions,
+    pub fn new(
+        compiler_options: &'a CompilerOptions,
         global_definitions: &'a GlobalDefinitions,
     ) -> Self {
         IntermediateCodeGenerator {
@@ -188,11 +202,10 @@ impl<'a> IntermediateCodeGenerator<'a> {
         }
     }
 
-    fn process_lvalue(&mut self, lv: &ast::Lvalue) -> Vec<IntermRepr> {
-        use IntermRepr::*;
+    fn process_lvalue(&mut self, lv: &AstLvalue) -> Vec<IntermRepr> {
         match lv {
-            ast::Lvalue::Name(name) => {
-                vec![LoadLvalue(
+            AstLvalue::Name(name) => {
+                vec![IntermRepr::LoadLvalue(
                     if let Some(info) = self.local_scope.unwrap().get(name) {
                         match info.info {
                             ProcessedDeclInfo::Label => Lvalue::Label(Label::Local(name.clone())),
@@ -204,10 +217,10 @@ impl<'a> IntermediateCodeGenerator<'a> {
                                 Lvalue::Label(Label::Global(name.clone()))
                             }
                             ProcessedDeclInfo::Auto { .. } => {
-                                if let Some((_, st)) =
-                                    self.name_to_stack_range.get_last(&Some(name))
+                                if let Some(stack_ranges) =
+                                    self.name_to_stack_range.get_vec(&Some(name))
                                 {
-                                    Lvalue::LocalVar(st.clone())
+                                    Lvalue::LocalVar(stack_ranges.last().unwrap().1.clone())
                                 } else {
                                     unreachable!()
                                 }
@@ -218,27 +231,26 @@ impl<'a> IntermediateCodeGenerator<'a> {
                     },
                 )]
             }
-            ast::Lvalue::DerefRvalue(rv) => self.process_rvalue(&rv.rvalue),
-            ast::Lvalue::Indexing { vector, index } => {
+            AstLvalue::DerefRvalue(rv) => self.process_rvalue(&rv.rvalue),
+            AstLvalue::Indexing { vector, index } => {
                 let mut res = self.process_rvalue(&vector.rvalue);
-                res.push(Save);
+                res.push(IntermRepr::Save);
                 res.extend(self.process_rvalue(&index.rvalue));
-                res.push(BinOp(BinaryOp::Add));
+                res.push(IntermRepr::BinOp(BinaryOp::Add));
                 res
             }
         }
     }
 
     fn process_rvalue(&mut self, rv: &Rvalue) -> Vec<IntermRepr> {
-        use IntermRepr::*;
         match rv {
             Rvalue::Constant(c) => match &c.constant {
-                token::Constant::Number(x) => {
-                    vec![LoadConstant(*x)]
+                Constant::Number(x) => {
+                    vec![IntermRepr::LoadConstant(*x)]
                 }
-                token::Constant::String(s) => {
+                Constant::String(s) => {
                     let idx = self.try_add_to_str_pool(s);
-                    vec![LoadLvalue(Lvalue::Label(Label::PooledStr(idx)))]
+                    vec![IntermRepr::LoadLvalue(Lvalue::Label(Label::PooledStr(idx)))]
                 }
             },
             Rvalue::Lvalue(lv) => {
@@ -267,28 +279,28 @@ impl<'a> IntermediateCodeGenerator<'a> {
                         unreachable!()
                     }
                 }
-                res.push(Deref);
+                res.push(IntermRepr::Deref);
                 res
             }
             Rvalue::Assign { lhs, assign, rhs } => {
                 let mut res = self.process_lvalue(&lhs.lvalue);
-                res.push(Save);
+                res.push(IntermRepr::Save);
                 if let Some(bin_op) = assign.bin_op {
-                    res.push(Deref);
-                    res.push(Save);
+                    res.push(IntermRepr::Deref);
+                    res.push(IntermRepr::Save);
                     res.extend(self.process_rvalue(rhs.rvalue.as_ref()));
-                    res.push(BinOp(BinaryOp::from(bin_op)));
+                    res.push(IntermRepr::BinOp(BinaryOp::from(bin_op)));
                 } else {
                     res.extend(self.process_rvalue(&rhs.rvalue))
                 }
-                res.push(WriteLvalue);
+                res.push(IntermRepr::WriteLvalue);
                 res
             }
             Rvalue::Binary { lhs, bin_op, rhs } => {
                 let mut res = self.process_rvalue(&lhs.rvalue);
-                res.push(Save);
+                res.push(IntermRepr::Save);
                 res.extend(self.process_rvalue(&rhs.rvalue));
-                res.push(BinOp(BinaryOp::from(*bin_op)));
+                res.push(IntermRepr::BinOp(BinaryOp::from(*bin_op)));
                 res
             }
             Rvalue::IncDec(IncDecNode {
@@ -297,7 +309,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 lvalue,
             }) => {
                 let mut res = self.process_lvalue(&lvalue.lvalue);
-                res.push(LvUnary(IncDec {
+                res.push(IntermRepr::LvUnary(IncDec {
                     inc_or_dec: *inc_or_dec,
                     inc_dec_type: *inc_dec_type,
                 }));
@@ -306,9 +318,9 @@ impl<'a> IntermediateCodeGenerator<'a> {
             Rvalue::Unary(un, rv) => {
                 let mut res = self.process_rvalue(&rv.rvalue);
                 match un {
-                    Unary::Minus => res.push(RvUnary(RvalueUnary::Minus)),
-                    Unary::LogicalNot => res.push(RvUnary(RvalueUnary::LogicalNot)),
-                    Unary::Complement => res.push(RvUnary(RvalueUnary::Complement)),
+                    Unary::Minus => res.push(IntermRepr::RvUnary(RvalueUnary::Minus)),
+                    Unary::LogicalNot => res.push(IntermRepr::RvUnary(RvalueUnary::LogicalNot)),
+                    Unary::Complement => res.push(IntermRepr::RvUnary(RvalueUnary::Complement)),
                     Unary::Plus => (),
                 }
                 res
@@ -324,13 +336,13 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 let on_false_label = self.label_counter.next().unwrap();
                 let mut res = self.process_rvalue(&condition.rvalue);
 
-                res.push(TestAndJumpIfZero(on_false_label));
+                res.push(IntermRepr::TestAndJumpIfZero(on_false_label));
                 res.extend(self.process_rvalue(&on_true.rvalue));
-                res.push(Jump(out));
+                res.push(IntermRepr::Jump(out));
 
-                res.push(InternalLabel(on_false_label));
+                res.push(IntermRepr::InternalLabel(on_false_label));
                 res.extend(self.process_rvalue(&on_false.rvalue));
-                res.push(InternalLabel(out));
+                res.push(IntermRepr::InternalLabel(out));
                 res
             }
             Rvalue::BracketedExpression(rv) => self.process_rvalue(&rv.rvalue),
@@ -338,12 +350,14 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 let mut res = vec![];
                 for arg in arguments.iter().rev() {
                     res.extend(self.process_rvalue(&arg.rvalue));
-                    res.push(Save);
+                    res.push(IntermRepr::Save);
                 }
-                res.push(LoadConstant(arguments.len().try_into().unwrap()));
-                res.push(Save);
+                res.push(IntermRepr::LoadConstant(
+                    arguments.len().try_into().unwrap(),
+                ));
+                res.push(IntermRepr::Save);
                 res.extend(self.process_rvalue(&fn_name.rvalue));
-                res.push(Call {
+                res.push(IntermRepr::Call {
                     nargs: arguments.len().try_into().unwrap(),
                 });
                 res
@@ -356,21 +370,25 @@ impl<'a> IntermediateCodeGenerator<'a> {
         curr_fn: &mut FnInfo,
         node: &'a FlatNode,
     ) -> Vec<IntermRepr> {
-        use IntermRepr::*;
         debug_assert!(is_regular_node(node));
         match node {
             FlatNode::Decl(decl) => match &decl.info {
                 FlatDeclarationNameInfo::Extern => vec![],
                 FlatDeclarationNameInfo::Label => {
-                    vec![DeclLabel(decl.name.clone())]
+                    vec![IntermRepr::DeclLabel(decl.name.clone())]
                 }
 
                 FlatDeclarationNameInfo::Auto {
                     specified_size_if_vec,
                 } => {
-                    let local_var_no = self.name_to_stack_range.total_items().try_into().unwrap();
+                    let local_var_no = self
+                        .name_to_stack_range
+                        .iter_all()
+                        .fold(0, |acc, (_, values)| acc + values.len())
+                        .try_into()
+                        .unwrap();
                     if let Some(ConstantNode {
-                        constant: token::Constant::Number(spec_size),
+                        constant: Constant::Number(spec_size),
                         ..
                     }) = specified_size_if_vec
                     {
@@ -402,8 +420,8 @@ impl<'a> IntermediateCodeGenerator<'a> {
                     debug_assert!(after_both_branches.is_none());
                     *after_both_branches = Some(after_else_body);
                     vec![
-                        Jump(after_else_body),
-                        InternalLabel(*condition_is_false_label),
+                        IntermRepr::Jump(after_else_body),
+                        IntermRepr::InternalLabel(*condition_is_false_label),
                     ]
                 } else {
                     unreachable!()
@@ -419,7 +437,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                     after_last_stmt, ..
                 } = last_br_stmt
                 {
-                    vec![Jump(*after_last_stmt)]
+                    vec![IntermRepr::Jump(*after_last_stmt)]
                 } else {
                     unreachable!()
                 }
@@ -431,14 +449,14 @@ impl<'a> IntermediateCodeGenerator<'a> {
                     check_cond_label, ..
                 } = last_wh_stmt
                 {
-                    vec![Jump(*check_cond_label)]
+                    vec![IntermRepr::Jump(*check_cond_label)]
                 } else {
                     unreachable!()
                 }
             }
             FlatNode::Goto(rv) => {
                 let mut res = self.process_rvalue(rv);
-                res.push(Goto);
+                res.push(IntermRepr::Goto);
                 res
             }
             FlatNode::Case(constant) => {
@@ -464,7 +482,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                         debug_assert!(default_case_label.is_none());
                         *default_case_label = Some(label_no);
                     }
-                    vec![InternalLabel(label_no)]
+                    vec![IntermRepr::InternalLabel(label_no)]
                 } else {
                     unreachable!()
                 }
@@ -474,7 +492,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 if let Some(rv) = rv {
                     res.extend(self.process_rvalue(rv));
                 }
-                res.push(Ret);
+                res.push(IntermRepr::Ret);
                 res
             }
             _ => unreachable!(),
@@ -619,7 +637,6 @@ impl<'a> IntermediateCodeGenerator<'a> {
     ) -> (Vec<IntermRepr>, usize) {
         self.reset_everything_except_str_pool();
         let mut res = vec![];
-        use IntermRepr::*;
         if let FlatNode::Def(FlatDefinition {
             name,
             info: FlatDefinitionInfo::Function { params },
@@ -630,7 +647,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 .enumerate()
                 .map(|(i, (param, _))| (param, i.try_into().unwrap()))
                 .collect();
-            res.push(FnDef(
+            res.push(IntermRepr::FnDef(
                 name.clone(),
                 FnInfo {
                     stack_size: 0,
@@ -641,14 +658,14 @@ impl<'a> IntermediateCodeGenerator<'a> {
             unreachable!()
         }
 
-        let curr_fn = if let FnDef(_, info) = &mut res[0] {
+        let curr_fn = if let IntermRepr::FnDef(_, info) = &mut res[0] {
             info
         } else {
             unreachable!()
         };
         let (rest_of_nodes, adv) = self.process_slice(curr_fn, &prog_slice[1..]);
         res.extend(rest_of_nodes);
-        res.push(Ret);
+        res.push(IntermRepr::Ret);
         (res, adv + 1)
     }
 
@@ -665,18 +682,15 @@ impl<'a> IntermediateCodeGenerator<'a> {
     fn name_or_constant_to_ival(&mut self, x: &NameOrConstant) -> Ival {
         match x {
             NameOrConstant::Name(name) => Ival::Name(Label::Global(name.clone())),
-            NameOrConstant::Constant(token::Constant::Number(n)) => Ival::Number(*n),
-            NameOrConstant::Constant(token::Constant::String(s)) => {
+            NameOrConstant::Constant(Constant::Number(n)) => Ival::Number(*n),
+            NameOrConstant::Constant(Constant::String(s)) => {
                 let idx = self.try_add_to_str_pool(s);
                 Ival::Name(Label::PooledStr(idx))
             }
         }
     }
 
-    pub(crate) fn run(
-        &mut self,
-        program: &'a ScopeTable,
-    ) -> (Vec<IntermRepr>, HashMap<String, u64>) {
+    pub fn run(&mut self, program: &'a ScopeTable) -> (Vec<IntermRepr>, HashMap<String, u64>) {
         let mut res = vec![];
         for (name, def) in &program.global {
             match &def.info {

@@ -1,16 +1,17 @@
-use cell::Cell;
-use collections::HashMap;
-use std::*;
+use std::cell::Cell;
+use std::collections::HashMap;
 
-use crate::config::*;
+use crate::utils;
+
 use token::*;
+use utils::{CompilerOptions, Issue, ReservedSymbolsTable};
 
 pub mod token;
 
-pub(crate) struct Tokenizer<'a> {
-    pub(crate) escape_sequences: &'a HashMap<String, String>,
-    pub(crate) reserved_symbols: &'a ReservedSymbolsTable,
-    pub(crate) compiler_options: CompilerOptions,
+pub struct Tokenizer<'a> {
+    pub escape_sequences: &'a HashMap<String, String>,
+    pub reserved_symbols: &'a ReservedSymbolsTable,
+    pub compiler_options: &'a CompilerOptions,
 }
 
 fn parse_assign_binary_operator(s: &str) -> Option<(RichBinaryOperation, usize)> {
@@ -47,43 +48,50 @@ fn parse_assign_binary_operator(s: &str) -> Option<(RichBinaryOperation, usize)>
 }
 
 fn parse_operator(s: &str) -> Option<(Operator, usize)> {
-    use token::Assign as AssignStruct;
-    use token::IncOrDec::*;
-    use BinaryOperation::*;
-    use BinaryRelation::*;
-    use Operator::*;
-    use RichBinaryOperation::*;
-    use UnaryOperation::*;
-
     return Some(match s.chars().take(3).collect::<Vec<char>>().as_slice() {
-        ['+', '+', _] => (IncDec(Increment), 2),
-        ['-', '-', _] => (IncDec(Decrement), 2),
+        ['+', '+', _] => (Operator::IncDec(IncOrDec::Increment), 2),
+        ['-', '-', _] => (Operator::IncDec(IncOrDec::Decrement), 2),
 
-        ['+', _, _] => (Plus, 1),
-        ['-', _, _] => (Minus, 1),
+        ['+', _, _] => (Operator::Plus, 1),
+        ['-', _, _] => (Operator::Minus, 1),
 
-        ['&', _, _] => (Ampersand, 1),
-        ['*', _, _] => (Asterisk, 1),
+        ['&', _, _] => (Operator::Ampersand, 1),
+        ['*', _, _] => (Operator::Asterisk, 1),
 
-        ['!', '=', _] => (Binary(Cmp(Ne)), 2),
-        ['!', _, _] => (Unary(LogicalNot), 1),
-        ['~', _, _] => (Unary(Complement), 1),
+        ['!', '=', _] => (
+            Operator::Binary(BinaryOperation::Cmp(BinaryRelation::Ne)),
+            2,
+        ),
+        ['!', _, _] => (Operator::Unary(UnaryOperation::LogicalNot), 1),
+        ['~', _, _] => (Operator::Unary(UnaryOperation::Complement), 1),
 
-        ['=', '=', '='] => (Assign(AssignStruct::from(RegularBinary(Cmp(Eq)))), 3),
-        ['=', '=', _] => (Binary(Cmp(Eq)), 2),
+        ['=', '=', '='] => (
+            Operator::Assign(Assign::from(RichBinaryOperation::RegularBinary(
+                BinaryOperation::Cmp(BinaryRelation::Eq),
+            ))),
+            3,
+        ),
+        ['=', '=', _] => (
+            Operator::Binary(BinaryOperation::Cmp(BinaryRelation::Eq)),
+            2,
+        ),
 
         ['=', _, _] => {
             if let Some((rich_bin_op, rich_bin_op_len)) = parse_assign_binary_operator(&s[1..]) {
-                (Assign(AssignStruct::from(rich_bin_op)), 1 + rich_bin_op_len)
+                (
+                    Operator::Assign(Assign::from(rich_bin_op)),
+                    1 + rich_bin_op_len,
+                )
             } else {
-                (Assign(AssignStruct::from(None)), 1)
+                (Operator::Assign(Assign::from(None)), 1)
             }
         }
 
         _ => {
-            if let Some((RegularBinary(bin_op), rich_bin_op_len)) = parse_assign_binary_operator(s)
+            if let Some((RichBinaryOperation::RegularBinary(bin_op), rich_bin_op_len)) =
+                parse_assign_binary_operator(s)
             {
-                (Binary(bin_op), rich_bin_op_len)
+                (Operator::Binary(bin_op), rich_bin_op_len)
             } else {
                 return None;
             }
@@ -229,7 +237,7 @@ impl Tokenizer<'_> {
                     if name_len > 0 {
                         if let Some(keyword) = self.reserved_symbols.get(&name) {
                             if *keyword == ReservedName::CtrlStmt(CtrlStmtIdent::Continue)
-                                && !self.compiler_options.continue_is_enabled
+                                && !self.compiler_options.enable_continue
                             {
                                 res.push(Token {
                                     token: WrappedToken::Name(name),
@@ -304,8 +312,7 @@ impl Tokenizer<'_> {
                             continue;
                         } else {
                             return Err(format!(
-                                "{}: unknown character encountered: {}",
-                                token_pos, curr_char as char
+                                "{token_pos}: unknown character encountered: {curr_char}",
                             ));
                         }
                     }
@@ -324,11 +331,7 @@ impl Tokenizer<'_> {
         Ok(res)
     }
 
-    pub(crate) fn run(
-        &self,
-        source_code: &str,
-        issues: &mut Vec<Issue>,
-    ) -> Result<Vec<Token>, String> {
+    pub fn run(&self, source_code: &str, issues: &mut Vec<Issue>) -> Result<Vec<Token>, String> {
         self.tokenize(source_code, issues)
     }
 }

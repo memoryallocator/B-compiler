@@ -1,8 +1,9 @@
-pub(crate) mod flat_ast;
+use crate::tokenizer::token::{
+    Assign, Constant, IncOrDec, RichBinaryOperation, Token, TokenPos, WrappedToken,
+};
+use crate::utils::Issue;
 
-use crate::config::Issue;
-use crate::tokenizer::token;
-use token::*;
+pub(crate) mod flat_ast;
 
 #[derive(Debug)]
 pub(crate) enum Ival {
@@ -63,14 +64,14 @@ pub(crate) struct AutoDeclaration {
 
 #[derive(Debug)]
 pub(crate) struct AutoDeclarationNode {
-    pub(crate) position: TokenPos,
+    pub(crate) _position: TokenPos,
     pub(crate) declarations: Vec<AutoDeclaration>,
     pub(crate) next_statement: StatementNode,
 }
 
 #[derive(Debug)]
 pub(crate) struct ExternDeclarationNode {
-    pub(crate) position: TokenPos,
+    pub(crate) _position: TokenPos,
     pub(crate) names: Vec<(String, TokenPos)>,
     pub(crate) next_statement: StatementNode,
 }
@@ -143,7 +144,7 @@ pub(crate) enum Rvalue {
     Lvalue(LvalueNode),
     Assign {
         lhs: LvalueNode,
-        assign: token::Assign,
+        assign: Assign,
         rhs: RvalueNode,
     },
     IncDec(IncDecNode),
@@ -151,7 +152,7 @@ pub(crate) enum Rvalue {
     TakeAddress(LvalueNode),
     Binary {
         lhs: RvalueNode,
-        bin_op: token::RichBinaryOperation,
+        bin_op: RichBinaryOperation,
         rhs: RvalueNode,
     },
     ConditionalExpression {

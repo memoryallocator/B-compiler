@@ -1,8 +1,14 @@
-use std::*;
+use crate::machine_code_generator;
+use crate::utils;
 
-use super::*;
-
-use crate::config::*;
+use machine_code_generator::MachineCodeGenerator;
+use machine_code_generator::START;
+use machine_code_generator::{
+    executable_section_or_segment, internal_def, mangle_global_def,
+    readable_writable_section_or_segment,
+};
+use utils::get_standard_library_names;
+use utils::{StdNameInfo, TargetPlatform, WIN_64};
 
 const TARGET: TargetPlatform = WIN_64;
 
@@ -11,7 +17,7 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
     let stdin = internal_def("stdin");
     let stdout = internal_def("stdout");
     let proc_heap = internal_def("proc_heap");
-    let mut res = vec![executable_section_or_segment(TARGET).to_owned()];
+    let mut res = vec![executable_section_or_segment(TARGET).to_string()];
 
     for (name, info) in get_standard_library_names() {
         if let StdNameInfo::Variable { .. } = info {
@@ -70,13 +76,13 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
 
             "exit" => r"xor rcx, rcx
                             jmp [ExitProcess]"
-                .to_owned(),
+                .to_string(),
 
             "char" => r"
                     rol rdx, 3
                     movzx rax, BYTE [rdx + r8]
                     ret"
-            .to_owned(),
+            .to_string(),
 
             "getvec" => format!(
                 r"
@@ -252,18 +258,18 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                 )
             }
 
-            _ => "dq 0".to_owned(),
+            _ => "dq 0".to_string(),
         });
     }
 
-    res.push(readable_writable_section_or_segment(TARGET).to_owned());
+    res.push(readable_writable_section_or_segment(TARGET).to_string());
     res.extend(vec![format!("{} dq ?", stdout), format!("{} dq ?", stdin)]);
     res.push(format!("{} dq ?", proc_heap));
 
-    res.push(executable_section_or_segment(TARGET).to_owned());
+    res.push(executable_section_or_segment(TARGET).to_string());
     res.push(format!("{}:", START));
     res.push(MachineCodeGenerator::align_stack(call_conv.alignment));
-    res.push("sub rsp, 4 * 8".to_owned());
+    res.push("sub rsp, 4 * 8".to_string());
     res.extend(
         vec![
             "mov rcx, -11",
@@ -278,7 +284,7 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
         .into_iter()
         .map(String::from),
     );
-    res.push("xor rcx, rcx".to_owned());
+    res.push("xor rcx, rcx".to_string());
     res.push(format!("call {}", mangle_global_def("main")));
     res.push(format!("jmp {}", mangle_global_def("exit")));
     res

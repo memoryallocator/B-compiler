@@ -57,7 +57,7 @@ impl Bracket {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
-pub(crate) enum LeftOrRight {
+pub enum LeftOrRight {
     Left,
     Right,
 }
@@ -82,7 +82,7 @@ pub(crate) enum Constant {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum UnaryOperation {
+pub enum UnaryOperation {
     LogicalNot,
     Complement,
 }
@@ -101,7 +101,7 @@ impl Display for UnaryOperation {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
-pub(crate) enum BinaryRelation {
+pub enum BinaryRelation {
     Gt,
     Eq,
     Lt,
@@ -128,7 +128,7 @@ impl Display for BinaryRelation {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
-pub(crate) enum BinaryOperation {
+pub enum BinaryOperation {
     Div,
     Mod,
     Or,
@@ -143,16 +143,16 @@ impl Display for BinaryOperation {
             f,
             "{}",
             match self {
-                BinaryOperation::Div => "/".to_owned(),
-                BinaryOperation::Mod => "%".to_owned(),
-                BinaryOperation::Or => "|".to_owned(),
-                BinaryOperation::Xor => "^".to_owned(),
+                BinaryOperation::Div => "/".to_string(),
+                BinaryOperation::Mod => "%".to_string(),
+                BinaryOperation::Or => "|".to_string(),
+                BinaryOperation::Xor => "^".to_string(),
                 BinaryOperation::Shift(direction) => {
                     match direction {
                         LeftOrRight::Left => "<<",
                         LeftOrRight::Right => ">>",
                     }
-                    .to_owned()
+                    .to_string()
                 }
                 BinaryOperation::Cmp(cmp) => {
                     format!("{}", cmp)
@@ -181,17 +181,18 @@ impl Display for RichBinaryOperation {
                 RichBinaryOperation::RegularBinary(b) => {
                     format!("{}", b)
                 }
-                RichBinaryOperation::Add => "+".to_owned(),
-                RichBinaryOperation::Sub => "-".to_owned(),
-                RichBinaryOperation::Mul => "*".to_owned(),
-                RichBinaryOperation::BitwiseAnd | RichBinaryOperation::LogicalAnd => "&".to_owned(),
+                RichBinaryOperation::Add => "+".to_string(),
+                RichBinaryOperation::Sub => "-".to_string(),
+                RichBinaryOperation::Mul => "*".to_string(),
+                RichBinaryOperation::BitwiseAnd | RichBinaryOperation::LogicalAnd =>
+                    "&".to_string(),
             }
         )
     }
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
-pub(crate) enum CtrlStmtIdent {
+pub enum CtrlStmtIdent {
     If,
     Else,
     Goto,
@@ -206,13 +207,13 @@ pub(crate) enum CtrlStmtIdent {
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
-pub(crate) enum DeclarationSpecifier {
+pub enum DeclarationSpecifier {
     Auto,
     Extrn,
 }
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug, Hash)]
-pub(crate) struct Assign {
+pub struct Assign {
     pub(crate) bin_op: Option<RichBinaryOperation>,
 }
 
@@ -229,13 +230,13 @@ impl From<RichBinaryOperation> for Assign {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub(crate) enum IncOrDec {
+pub enum IncOrDec {
     Increment,
     Decrement,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum Operator {
+pub enum Operator {
     Plus,
     Minus,
     Asterisk,
@@ -267,10 +268,10 @@ impl Display for Operator {
             f,
             "{}",
             match self {
-                Operator::Plus => "+".to_owned(),
-                Operator::Minus => "-".to_owned(),
-                Operator::Asterisk => "*".to_owned(),
-                Operator::Ampersand => "&".to_owned(),
+                Operator::Plus => "+".to_string(),
+                Operator::Minus => "-".to_string(),
+                Operator::Asterisk => "*".to_string(),
+                Operator::Ampersand => "&".to_string(),
                 Operator::Unary(un) => {
                     format!("{}", un)
                 }
@@ -278,9 +279,9 @@ impl Display for Operator {
                     format!("{}", bin)
                 }
                 Operator::Assign(a) => {
-                    "=".to_owned()
+                    "=".to_string()
                         + &match a.bin_op {
-                            None => "".to_owned(),
+                            None => "".to_string(),
                             Some(bin_op) => {
                                 format!("{}", bin_op)
                             }
@@ -291,7 +292,7 @@ impl Display for Operator {
                         IncOrDec::Increment => "++",
                         IncOrDec::Decrement => "--",
                     }
-                    .to_owned()
+                    .to_string()
                 }
             }
         )
@@ -299,7 +300,7 @@ impl Display for Operator {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub(crate) enum ReservedName {
+pub enum ReservedName {
     CtrlStmt(CtrlStmtIdent),
     DeclarationSpecifier(DeclarationSpecifier),
 }
@@ -318,7 +319,7 @@ pub(crate) enum WrappedToken {
 }
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug, Hash, PartialOrd)]
-pub(crate) struct TokenPos {
+pub struct TokenPos {
     pub(crate) line: usize,
     pub(crate) column: usize,
 }

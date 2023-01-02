@@ -2,3 +2,9 @@
 name = "b-compiler"
 version = "0.0.1"
 edition = "2021"
+
+[dependencies]
+anyhow = "1.0.68"
+config-manager = "0.1.0"
+itertools = "0.10.5"
+multimap = "0.8.3"

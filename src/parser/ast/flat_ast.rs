@@ -1,10 +1,10 @@
-use std::*;
+use crate::parser;
+use crate::tokenizer::token::{Constant, TokenPos};
 
+use ast::Ival as AstIval;
 use ast::*;
-use token::TokenPos;
-
-use crate::parser::ast;
-use crate::tokenizer::token;
+use parser::ast;
+use parser::Rvalue;
 
 pub(crate) trait FlattenNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos>;
@@ -22,14 +22,14 @@ pub(crate) struct Ival {
     pub(crate) value: NameOrConstant,
 }
 
-impl From<ast::Ival> for Ival {
-    fn from(x: ast::Ival) -> Self {
+impl From<AstIval> for Ival {
+    fn from(x: AstIval) -> Self {
         match x {
-            ast::Ival::Constant(ConstantNode { position, constant }) => Ival {
+            AstIval::Constant(ConstantNode { position, constant }) => Ival {
                 value: NameOrConstant::Constant(constant),
                 pos: position,
             },
-            ast::Ival::Name(name, pos) => Ival {
+            AstIval::Name(name, pos) => Ival {
                 value: NameOrConstant::Name(name),
                 pos,
             },
@@ -100,8 +100,7 @@ impl FlattenNode for ProgramNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
         self.definitions
             .into_iter()
-            .map(|def| def.flatten_node())
-            .flatten()
+            .flat_map(FlattenNode::flatten_node)
             .collect()
     }
 }
@@ -164,10 +163,12 @@ impl FlattenNode for FunctionDefinitionNode {
 impl FlattenNode for StatementNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
         let append_end_marker = {
-            use Statement::*;
             matches!(
                 self.statement.as_ref(),
-                Compound(_) | Switch(_) | If(_) | While(_)
+                Statement::Compound(_)
+                    | Statement::Switch(_)
+                    | Statement::If(_)
+                    | Statement::While(_)
             )
         };
         let mut res = match *self.statement {
@@ -274,8 +275,7 @@ impl FlattenNode for CompoundStatementNode {
         let body: Vec<FlatNodeAndPos> = self
             .statement_list
             .into_iter()
-            .map(|stmt| stmt.flatten_node())
-            .flatten()
+            .flat_map(FlattenNode::flatten_node)
             .collect();
 
         res.extend(body);
@@ -298,8 +298,7 @@ impl FlattenNode for AutoDeclarationNode {
         let mut res = self
             .declarations
             .into_iter()
-            .map(|auto_decl| auto_decl.flatten_node())
-            .flatten()
+            .flat_map(FlattenNode::flatten_node)
             .collect::<Vec<FlatNodeAndPos>>();
         res.extend(self.next_statement.flatten_node());
         res
