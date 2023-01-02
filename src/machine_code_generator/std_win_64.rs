@@ -1,8 +1,4 @@
-use std::*;
-
-use super::*;
-
-use crate::config::*;
+use crate::utils::StdNameInfo;
 
 const TARGET: TargetPlatform = WIN_64;
 

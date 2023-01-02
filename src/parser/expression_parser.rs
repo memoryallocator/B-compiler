@@ -1,10 +1,9 @@
-use cell::Cell;
-use collections::VecDeque;
-use iter::FromIterator;
-use std::*;
+use std::cell::Cell;
+use std::collections::VecDeque;
+use std::iter::FromIterator;
 
-use crate::config::Issue;
 use crate::tokenizer::token;
+use crate::utils::Issue;
 use token::*;
 
 use crate::parser::ast::*;

@@ -1,8 +1,7 @@
 pub(crate) mod flat_ast;
 
-use crate::config::Issue;
 use crate::tokenizer::token;
-use token::*;
+use crate::utils::Issue;
 
 #[derive(Debug)]
 pub(crate) enum Ival {

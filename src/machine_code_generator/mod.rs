@@ -1,15 +1,15 @@
 mod std_linux_64;
 mod std_win_64;
 
-use cmp::min;
-use collections::{HashMap, HashSet};
-use std::*;
+use std::cmp::min;
+use std::collections::{HashMap, HashSet};
 
-use crate::config::*;
-use crate::intermediate_code_generator;
+use crate::intermediate_code_generator::{
+    BinaryOp, IntermRepr, Ival, Label, Lvalue, RvalueUnary, StackRange,
+};
 use crate::parser::ast::IncDecType;
 use crate::tokenizer;
-use intermediate_code_generator::*;
+use crate::utils::{Arch, CompilerOptions, StdNameInfo};
 use tokenizer::char_to_u64;
 use tokenizer::token::{BinaryRelation, IncOrDec, LeftOrRight};
 
@@ -289,7 +289,6 @@ impl<'a> MachineCodeGenerator<'a> {
     }
 
     fn generate_x86_64(self) -> Vec<String> {
-        use IntermRepr::*;
         let comp_opts = self.compiler_options;
         let target = comp_opts.target_platform;
         let call_conv = target.calling_convention();
@@ -318,7 +317,7 @@ impl<'a> MachineCodeGenerator<'a> {
         for ir in self.intermediate_code {
             let regs_for_args_len = regs_for_args.len() as u64;
             match ir {
-                LoadLvalue(lv) => {
+                IntermRepr::LoadLvalue(lv) => {
                     match lv {
                         Lvalue::NthArg(n) => {
                             if use_shadow_space || *n >= regs_for_args_len {
@@ -377,7 +376,7 @@ impl<'a> MachineCodeGenerator<'a> {
                         self.get_lvalue_offset_in_bits()
                     ))
                 }
-                WriteLvalue => {
+                IntermRepr::WriteLvalue => {
                     let supp_reg = supp_regs[0];
                     res.push(format!("pop {}", supp_reg));
                     res.push(format!(
@@ -387,8 +386,10 @@ impl<'a> MachineCodeGenerator<'a> {
                     ));
                     res.push(format!("mov [{}],{}", supp_reg, main_reg));
                 }
-                LoadConstant(constant) => res.push(format!("mov {},{}", main_reg, constant)),
-                Deref => {
+                IntermRepr::LoadConstant(constant) => {
+                    res.push(format!("mov {},{}", main_reg, constant))
+                }
+                IntermRepr::Deref => {
                     res.push(format!(
                         "rol {},{}",
                         main_reg,
@@ -396,20 +397,22 @@ impl<'a> MachineCodeGenerator<'a> {
                     ));
                     res.push(format!("mov {},[{0}]", main_reg));
                 }
-                DeclLabel(lbl) => res.push(format!("{}:", mangle_label(lbl))),
-                InternalLabel(lbl_id) => res.push(format!("{}:", internal_label(*lbl_id))),
-                Jump(lbl_id) => res.push(format!("jmp {}", internal_label(*lbl_id))),
-                CaseJmpIfEq { case_val, label_no } => {
+                IntermRepr::DeclLabel(lbl) => res.push(format!("{}:", mangle_label(lbl))),
+                IntermRepr::InternalLabel(lbl_id) => {
+                    res.push(format!("{}:", internal_label(*lbl_id)))
+                }
+                IntermRepr::Jump(lbl_id) => res.push(format!("jmp {}", internal_label(*lbl_id))),
+                IntermRepr::CaseJmpIfEq { case_val, label_no } => {
                     res.push(format!("cmp {},{}", main_reg, case_val));
                     res.push(format!("je {}", internal_label(*label_no)))
                 }
-                TestAndJumpIfZero(lbl_id) => {
+                IntermRepr::TestAndJumpIfZero(lbl_id) => {
                     res.push(format!("test {},{0}", main_reg));
                     res.push(format!("jz {}", internal_label(*lbl_id)));
                 }
-                Save => res.push(format!("push {}", main_reg)),
+                IntermRepr::Save => res.push(format!("push {}", main_reg)),
 
-                LvUnary(un) => {
+                IntermRepr::LvUnary(un) => {
                     res.push(format!(
                         "rol {},{}",
                         main_reg,
@@ -436,7 +439,7 @@ impl<'a> MachineCodeGenerator<'a> {
                         }
                     ));
                 }
-                RvUnary(un) => match un {
+                IntermRepr::RvUnary(un) => match un {
                     RvalueUnary::Minus => res.push(format!("neg {}", main_reg)),
                     RvalueUnary::Complement => res.push(format!("not {}", main_reg)),
                     RvalueUnary::LogicalNot => {
@@ -446,8 +449,8 @@ impl<'a> MachineCodeGenerator<'a> {
                         res.push(format!("movzx {},{}", main_reg, lower_byte));
                     }
                 },
-                Call { nargs } => res.extend(self.align_and_call(*nargs + 1)),
-                Goto => {
+                IntermRepr::Call { nargs } => res.extend(self.align_and_call(*nargs + 1)),
+                IntermRepr::Goto => {
                     res.push(format!(
                         "rol {},{}",
                         main_reg,
@@ -455,14 +458,14 @@ impl<'a> MachineCodeGenerator<'a> {
                     ));
                     res.push(format!("jmp {}", main_reg));
                 }
-                Ret => {
+                IntermRepr::Ret => {
                     res.push(format!("mov rsp,{}", reg_for_initial_rsp));
                     res.push(format!("pop {}", reg_for_initial_rsp));
                     res.push(format!("pop {}", reg_for_calls));
                     res.push("ret".to_owned());
                 }
 
-                FnDef(name, info) => {
+                IntermRepr::FnDef(name, info) => {
                     res.push(executable_section_or_segment(target).to_owned());
                     res.push(format!("{}:", mangle_global_def(name)));
 
@@ -500,19 +503,19 @@ impl<'a> MachineCodeGenerator<'a> {
                         ));
                     }
                 }
-                VarOrVecDef(name) => {
+                IntermRepr::VarOrVecDef(name) => {
                     res.push(readable_writable_section_or_segment(target).to_owned());
                     res.push(format!("{}:", mangle_global_def(name)));
                     user_defined.insert(name.as_str());
                 }
-                Ival(iv) => match iv {
-                    intermediate_code_generator::Ival::Number(x) => {
+                IntermRepr::Ival(iv) => match iv {
+                    Ival::Number(x) => {
                         res.push(format!("{} {}", declare_word_directive(word_size), x))
                     }
-                    intermediate_code_generator::Ival::ReserveWords(n) => {
+                    Ival::ReserveWords(n) => {
                         res.push(format!("{} {} dup ?", declare_word_directive(word_size), n))
                     }
-                    intermediate_code_generator::Ival::Name(lbl) => match lbl {
+                    Ival::Name(lbl) => match lbl {
                         Label::Local(_) => unreachable!(),
                         Label::Global(name) => res.push(format!("dq {}", mangle_global_def(name))),
                         Label::PooledStr(s) => res.push(format!("dq {}", pooled_str_label(*s))),

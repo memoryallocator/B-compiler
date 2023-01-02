@@ -1,18 +1,13 @@
-use borrow::Borrow;
-use collections::HashMap;
-use hash::Hash;
-use std::*;
+use std::borrow::Borrow;
+use std::collections::HashMap;
+use std::hash::Hash;
 
 use crate::parser::analyzer::Analyzer;
 pub(crate) use crate::parser::analyzer::ScopeTable;
 pub(crate) use crate::parser::analyzer::{DeclInfoAndPos, DefInfoAndPos};
-use crate::parser::ast::*;
-use flat_ast::FlattenNode;
-
-use crate::config::*;
+use crate::parser::ast::flat_ast::FlattenNode;
 use crate::tokenizer::token;
-use token::*;
-use Issue::*;
+use token::{BracketType, CtrlStmtIdent, LeftOrRight, WrappedToken};
 
 pub(crate) mod analyzer;
 pub mod ast;

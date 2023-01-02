@@ -1,18 +1,18 @@
-use cell::Cell;
-use cmp::max;
-use collections::HashMap;
-use ops::RangeInclusive;
-use std::*;
+use std::cell::Cell;
+use std::cmp::max;
+use std::collections::HashMap;
+use std::ops::RangeInclusive;
 
-use crate::config::CompilerOptions;
 use crate::parser;
 use crate::tokenizer::token;
-use ast::flat_ast::*;
+use crate::utils::CompilerOptions;
+use analyzer::{DefInfo, ProcessedDeclInfo, ScopeTable, VarDefInfo};
+use ast::flat_ast::{FlatDeclarationNameInfo, FlatDefinitionInfo, FlatNode, NameOrConstant};
 use ast::{ConstantNode, FunctionCallNode, IncDecNode, IncDecType, Rvalue, Unary};
-use parser::analyzer::*;
+use parser::analyzer;
 use parser::ast;
-use parser::{MultiMap, ScopeTable};
-use token::*;
+use parser::MultiMap;
+use token::{BinaryOperation, Constant, RichBinaryOperation};
 
 #[derive(Debug)]
 pub(crate) enum Ival {

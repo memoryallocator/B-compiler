@@ -17,15 +17,13 @@ use config_manager::config;
     )
 )]
 struct InternalConfig {
-    #[source(clap(long, short), env, config)]
-    out: String,
-    #[source(clap(long, short), env, config)]
+    #[source(clap(long), env, config)]
     ir: bool,
     #[source(clap(long, short), env, config)]
     arch: Arch,
     #[source(clap(long, short), env, config)]
     platform: TargetPlatform,
-    #[source(clap(long, short), env, config)]
+    #[source(clap(long), env, config)]
     enable_continue: bool,
     #[source(clap(long, short), env, config)]
     heap: u64,

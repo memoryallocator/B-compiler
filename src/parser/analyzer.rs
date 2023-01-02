@@ -1,15 +1,13 @@
-use cell::Cell;
-use collections::HashMap;
-use ops::Range;
-use std::*;
+use std::cell::Cell;
+use std::collections::HashMap;
+use std::ops::Range;
 
 use crate::tokenizer::token;
 use token::{Constant, TokenPos};
 
-use crate::config::*;
 use crate::parser;
+use crate::utils::Issue;
 use parser::ast;
-use parser::ast::flat_ast::*;
 
 #[derive(Debug, Clone)]
 pub(crate) enum ProcessedDeclInfo {
@@ -469,9 +467,7 @@ impl<'a> Analyzer<'a> {
             .iter()
             .filter_map(|node| {
                 if let FlatNode::Decl(
-                    decl
-                    @
-                    FlatDeclaration {
+                    decl @ FlatDeclaration {
                         info: FlatDeclarationNameInfo::Label,
                         ..
                     },

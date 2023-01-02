@@ -1,9 +1,6 @@
-use iter::FromIterator;
-use std::*;
+use std::iter::FromIterator;
 
-use super::*;
-
-use crate::config::*;
+use crate::utils::StdNameInfo;
 
 const TARGET: TargetPlatform = LINUX_64;
 

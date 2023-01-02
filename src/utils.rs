@@ -1,11 +1,9 @@
-use std;
-
-use collections::{HashMap, HashSet};
-use fmt::{Display, Formatter};
+use std::collections::{HashMap, HashSet};
+use std::fmt::{Display, Formatter};
 
 use crate::parser::{DeclInfoAndPos, DefInfoAndPos};
 use crate::tokenizer::token;
-// use token::*;
+use token::{LeftOrRight, Operator, ReservedName, TokenPos};
 
 pub(crate) enum Issue {
     BracketNotOpened(TokenPos),
@@ -491,8 +489,8 @@ pub(crate) fn get_escape_sequences() -> HashMap<String, String> {
 pub(crate) type ReservedSymbolsTable = HashMap<String, ReservedName>;
 
 pub(crate) fn get_reserved_symbols() -> ReservedSymbolsTable {
-    use CtrlStmtIdent::*;
-    use DeclarationSpecifier::*;
+    use token::CtrlStmtIdent::*;
+    use token::DeclarationSpecifier::*;
 
     vec![
         ("auto", ReservedName::DeclarationSpecifier(Auto)),

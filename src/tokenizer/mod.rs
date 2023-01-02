@@ -1,9 +1,10 @@
-use cell::Cell;
-use collections::HashMap;
-use std::*;
+use std::cell::Cell;
+use std::collections::HashMap;
 
-use crate::config::*;
-use token::*;
+use token::{
+    Assign, BinaryOperation, BinaryRelation, IncOrDec, LeftOrRight, Operator, RichBinaryOperation,
+    UnaryOperation,
+};
 
 pub mod token;
 
@@ -47,10 +48,10 @@ fn parse_assign_binary_operator(s: &str) -> Option<(RichBinaryOperation, usize)>
 }
 
 fn parse_operator(s: &str) -> Option<(Operator, usize)> {
-    use token::Assign as AssignStruct;
-    use token::IncOrDec::*;
+    use Assign as AssignStruct;
     use BinaryOperation::*;
     use BinaryRelation::*;
+    use IncOrDec::*;
     use Operator::*;
     use RichBinaryOperation::*;
     use UnaryOperation::*;
