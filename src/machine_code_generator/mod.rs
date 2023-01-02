@@ -24,11 +24,11 @@ pub struct MachineCodeGenerator<'a> {
 }
 
 fn mangle_global_def(s: &str) -> String {
-    "g!".to_string() + s
+    format!("g!{s}")
 }
 
 fn mangle_label(s: &str) -> String {
-    ".".to_string() + s
+    format!(".{s}")
 }
 
 fn internal_label(x: u64) -> String {

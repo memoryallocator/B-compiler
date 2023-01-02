@@ -11,24 +11,24 @@ use crate::utils::{Arch, PlatformName, TargetPlatform};
         format = "toml",
         clap(long = "config", short = 'c', help = "path to configuration file"),
         env = "b_compiler_config",
-        default = "./b-compiler-config.toml"
+        optional = true
     )
 )]
 struct InternalConfig {
     #[source(clap(long, short), env, config)]
     input: String,
-    #[source(clap(long), env, config)]
+    #[source(clap(long), env, config, default = false)]
     ir: bool,
-    #[source(clap(long, short), env, config)]
+    #[source(clap(long, short), env, config, default)]
     arch: Option<String>,
-    #[source(clap(long, short), env, config)]
-    target_platform_name: Option<String>,
-    #[source(clap(long), env, config)]
+    #[source(clap(long, short), env, config, default)]
+    target_platform: Option<String>,
+    #[source(clap(long), env, config, default = false)]
     enable_continue: bool,
-    #[source(clap(long, short), env, config)]
-    heap_size: u64,
-    #[source(clap(long, short), env, config)]
-    stack_size: u64,
+    #[source(clap(long), env, config, default = 65536)]
+    heap: u64,
+    #[source(clap(long), env, config, default = 4096)]
+    stack: u64,
 }
 
 #[derive(Clone)]
@@ -49,16 +49,16 @@ impl Config {
             input,
             ir,
             arch,
-            target_platform_name,
+            target_platform,
             enable_continue,
-            heap_size,
-            stack_size,
+            heap: heap_size,
+            stack: stack_size,
         } = config;
 
-        let target_platform = if target_platform_name.is_none() {
+        let target_platform = if target_platform.is_none() {
             TargetPlatform::native()
         } else {
-            let platform_name = match target_platform_name.as_deref() {
+            let platform_name = match target_platform.as_deref() {
                 Some("linux") => PlatformName::Linux,
                 Some("win" | "windows") => PlatformName::Windows,
                 Some(target_platform) => Err(Error::msg(format!(

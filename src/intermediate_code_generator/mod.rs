@@ -243,15 +243,14 @@ impl<'a> IntermediateCodeGenerator<'a> {
     }
 
     fn process_rvalue(&mut self, rv: &Rvalue) -> Vec<IntermRepr> {
-        use IntermRepr::*;
         match rv {
             Rvalue::Constant(c) => match &c.constant {
                 Constant::Number(x) => {
-                    vec![LoadConstant(*x)]
+                    vec![IntermRepr::LoadConstant(*x)]
                 }
                 Constant::String(s) => {
                     let idx = self.try_add_to_str_pool(s);
-                    vec![LoadLvalue(Lvalue::Label(Label::PooledStr(idx)))]
+                    vec![IntermRepr::LoadLvalue(Lvalue::Label(Label::PooledStr(idx)))]
                 }
             },
             Rvalue::Lvalue(lv) => {
@@ -280,28 +279,28 @@ impl<'a> IntermediateCodeGenerator<'a> {
                         unreachable!()
                     }
                 }
-                res.push(Deref);
+                res.push(IntermRepr::Deref);
                 res
             }
             Rvalue::Assign { lhs, assign, rhs } => {
                 let mut res = self.process_lvalue(&lhs.lvalue);
-                res.push(Save);
+                res.push(IntermRepr::Save);
                 if let Some(bin_op) = assign.bin_op {
-                    res.push(Deref);
-                    res.push(Save);
+                    res.push(IntermRepr::Deref);
+                    res.push(IntermRepr::Save);
                     res.extend(self.process_rvalue(rhs.rvalue.as_ref()));
-                    res.push(BinOp(BinaryOp::from(bin_op)));
+                    res.push(IntermRepr::BinOp(BinaryOp::from(bin_op)));
                 } else {
                     res.extend(self.process_rvalue(&rhs.rvalue))
                 }
-                res.push(WriteLvalue);
+                res.push(IntermRepr::WriteLvalue);
                 res
             }
             Rvalue::Binary { lhs, bin_op, rhs } => {
                 let mut res = self.process_rvalue(&lhs.rvalue);
-                res.push(Save);
+                res.push(IntermRepr::Save);
                 res.extend(self.process_rvalue(&rhs.rvalue));
-                res.push(BinOp(BinaryOp::from(*bin_op)));
+                res.push(IntermRepr::BinOp(BinaryOp::from(*bin_op)));
                 res
             }
             Rvalue::IncDec(IncDecNode {
@@ -310,7 +309,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 lvalue,
             }) => {
                 let mut res = self.process_lvalue(&lvalue.lvalue);
-                res.push(LvUnary(IncDec {
+                res.push(IntermRepr::LvUnary(IncDec {
                     inc_or_dec: *inc_or_dec,
                     inc_dec_type: *inc_dec_type,
                 }));
@@ -319,9 +318,9 @@ impl<'a> IntermediateCodeGenerator<'a> {
             Rvalue::Unary(un, rv) => {
                 let mut res = self.process_rvalue(&rv.rvalue);
                 match un {
-                    Unary::Minus => res.push(RvUnary(RvalueUnary::Minus)),
-                    Unary::LogicalNot => res.push(RvUnary(RvalueUnary::LogicalNot)),
-                    Unary::Complement => res.push(RvUnary(RvalueUnary::Complement)),
+                    Unary::Minus => res.push(IntermRepr::RvUnary(RvalueUnary::Minus)),
+                    Unary::LogicalNot => res.push(IntermRepr::RvUnary(RvalueUnary::LogicalNot)),
+                    Unary::Complement => res.push(IntermRepr::RvUnary(RvalueUnary::Complement)),
                     Unary::Plus => (),
                 }
                 res
@@ -337,13 +336,13 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 let on_false_label = self.label_counter.next().unwrap();
                 let mut res = self.process_rvalue(&condition.rvalue);
 
-                res.push(TestAndJumpIfZero(on_false_label));
+                res.push(IntermRepr::TestAndJumpIfZero(on_false_label));
                 res.extend(self.process_rvalue(&on_true.rvalue));
-                res.push(Jump(out));
+                res.push(IntermRepr::Jump(out));
 
-                res.push(InternalLabel(on_false_label));
+                res.push(IntermRepr::InternalLabel(on_false_label));
                 res.extend(self.process_rvalue(&on_false.rvalue));
-                res.push(InternalLabel(out));
+                res.push(IntermRepr::InternalLabel(out));
                 res
             }
             Rvalue::BracketedExpression(rv) => self.process_rvalue(&rv.rvalue),
@@ -351,12 +350,14 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 let mut res = vec![];
                 for arg in arguments.iter().rev() {
                     res.extend(self.process_rvalue(&arg.rvalue));
-                    res.push(Save);
+                    res.push(IntermRepr::Save);
                 }
-                res.push(LoadConstant(arguments.len().try_into().unwrap()));
-                res.push(Save);
+                res.push(IntermRepr::LoadConstant(
+                    arguments.len().try_into().unwrap(),
+                ));
+                res.push(IntermRepr::Save);
                 res.extend(self.process_rvalue(&fn_name.rvalue));
-                res.push(Call {
+                res.push(IntermRepr::Call {
                     nargs: arguments.len().try_into().unwrap(),
                 });
                 res
