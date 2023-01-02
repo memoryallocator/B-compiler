@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.68"
 config-manager = "0.1.0"
+multimap = "0.8.3"

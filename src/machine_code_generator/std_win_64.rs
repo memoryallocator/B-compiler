@@ -1,4 +1,4 @@
-use crate::utils::StdNameInfo;
+use crate::utils::{StdNameInfo, TargetPlatform, WIN_64};
 
 const TARGET: TargetPlatform = WIN_64;
 

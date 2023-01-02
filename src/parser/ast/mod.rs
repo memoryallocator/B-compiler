@@ -1,6 +1,6 @@
 pub(crate) mod flat_ast;
 
-use crate::tokenizer::token;
+use crate::tokenizer::token::{Constant, RichBinaryOperation, TokenPos, WrappedToken};
 use crate::utils::Issue;
 
 #[derive(Debug)]
@@ -142,7 +142,7 @@ pub(crate) enum Rvalue {
     Lvalue(LvalueNode),
     Assign {
         lhs: LvalueNode,
-        assign: token::Assign,
+        assign: Assign,
         rhs: RvalueNode,
     },
     IncDec(IncDecNode),
@@ -150,7 +150,7 @@ pub(crate) enum Rvalue {
     TakeAddress(LvalueNode),
     Binary {
         lhs: RvalueNode,
-        bin_op: token::RichBinaryOperation,
+        bin_op: RichBinaryOperation,
         rhs: RvalueNode,
     },
     ConditionalExpression {

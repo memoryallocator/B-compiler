@@ -1,6 +1,12 @@
+use std::collections::HashMap;
 use std::iter::FromIterator;
 
-use crate::utils::StdNameInfo;
+use crate::machine_code_generator;
+use crate::utils::{get_standard_library_names, StdNameInfo, TargetPlatform, LINUX_64};
+
+use machine_code_generator::MachineCodeGenerator;
+use machine_code_generator::START;
+use machine_code_generator::{executable_section_or_segment, internal_def, mangle_global_def};
 
 const TARGET: TargetPlatform = LINUX_64;
 

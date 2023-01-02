@@ -2,8 +2,8 @@ use std::cell::Cell;
 use std::collections::HashMap;
 
 use token::{
-    Assign, BinaryOperation, BinaryRelation, IncOrDec, LeftOrRight, Operator, RichBinaryOperation,
-    UnaryOperation,
+    Assign, BinaryOperation, BinaryRelation, CtrlStmtIdent, IncOrDec, LeftOrRight, Operator,
+    RichBinaryOperation, UnaryOperation, WrappedToken,
 };
 
 pub mod token;

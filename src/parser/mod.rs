@@ -2,12 +2,16 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use crate::parser::analyzer::Analyzer;
-pub(crate) use crate::parser::analyzer::ScopeTable;
-pub(crate) use crate::parser::analyzer::{DeclInfoAndPos, DefInfoAndPos};
-use crate::parser::ast::flat_ast::FlattenNode;
-use crate::tokenizer::token;
-use token::{BracketType, CtrlStmtIdent, LeftOrRight, WrappedToken};
+use crate::tokenizer::token::{
+    BracketType, Constant, CtrlStmtIdent, DeclarationSpecifier, LeftOrRight, ReservedName,
+    WrappedToken,
+};
+use crate::utils::Issue::StmtTooShort;
+use analyzer::Analyzer;
+pub(crate) use analyzer::ScopeTable;
+pub(crate) use analyzer::{DeclInfoAndPos, DefInfoAndPos};
+use ast::flat_ast::FlattenNode;
+use ast::{ConstantNode, Statement};
 
 pub(crate) mod analyzer;
 pub mod ast;
@@ -474,10 +478,11 @@ impl Parse for ExternDeclarationNode {
             return Err(vec![StmtTooShort(input[0].pos)]);
         }
 
-        use token::DeclarationSpecifier::Extrn;
-
         if let Some(Token {
-            token: WrappedToken::ReservedName(ReservedName::DeclarationSpecifier(Extrn)),
+            token:
+                WrappedToken::ReservedName(ReservedName::DeclarationSpecifier(
+                    DeclarationSpecifier::Extrn,
+                )),
             ..
         }) = input.first()
         {
@@ -623,8 +628,6 @@ impl Parse for CaseNode {
             return Err(vec![StmtTooShort(input[0].pos)]);
         }
 
-        use token::CtrlStmtIdent::{Case, Default};
-
         let pos = input[0].pos;
         let colon_pos: usize;
         let constant = match input[0].token {
@@ -677,9 +680,6 @@ impl Parse for IfNode {
             // if ( rvalue ) ;
             return Err(vec![StmtTooShort(input[0].pos)]);
         }
-
-        use token::BracketType::Round;
-        use token::CtrlStmtIdent::{Else, If};
 
         if input[0].token != WrappedToken::ReservedName(ReservedName::CtrlStmt(If)) {
             return Err(vec![ExpectedTokenNotFound(input[0].pos)]);
@@ -841,8 +841,6 @@ impl Parse for GotoNode {
             return Err(vec![StmtTooShort(pos)]);
         }
 
-        use token::CtrlStmtIdent::Goto;
-
         if input[0].token != WrappedToken::ReservedName(ReservedName::CtrlStmt(Goto)) {
             return Err(vec![ExpectedTokenNotFound(pos)]);
         }
@@ -928,8 +926,6 @@ impl Parse for BreakNode {
             return Err(vec![StmtTooShort(input[0].pos)]);
         }
 
-        use token::CtrlStmtIdent::Break;
-
         match &input[..2] {
             [Token {
                 token: WrappedToken::ReservedName(ReservedName::CtrlStmt(Break)),
@@ -952,8 +948,6 @@ impl Parse for ContinueNode {
             // break ;
             return Err(vec![StmtTooShort(input[0].pos)]);
         }
-
-        use token::CtrlStmtIdent::Continue;
 
         match &input[..2] {
             [Token {
@@ -1004,14 +998,18 @@ impl Parse for Statement {
         Self: Sized,
     {
         debug_assert!(!input.is_empty());
-        use WrappedToken::*;
         let t = &input[0];
         let pos = t.pos;
         match &t.token {
             ReservedName(res_name) => {
                 use CtrlStmtIdent::*;
+
                 match res_name {
-                    token::ReservedName::CtrlStmt(cs) => match cs {
+                    ReservedName::DeclarationSpecifier(_) => {
+                        let (decl_node, adv) = DeclarationNode::parse(input)?;
+                        Ok((Statement::Declaration(decl_node), adv))
+                    }
+                    ReservedName::CtrlStmt(cs) => match cs {
                         If => {
                             let (r#if, adv) = IfNode::parse(input)?;
                             Ok((Statement::If(r#if), adv))
@@ -1046,14 +1044,10 @@ impl Parse for Statement {
                             Ok((Statement::Case(case), adv))
                         }
                     },
-                    token::ReservedName::DeclarationSpecifier(_) => {
-                        let (decl_node, adv) = DeclarationNode::parse(input)?;
-                        Ok((Statement::Declaration(decl_node), adv))
-                    }
                 }
             }
             Semicolon => Ok((Statement::Null, 1)),
-            Bracket(token::Bracket {
+            Bracket(Bracket {
                 left_or_right: LeftOrRight::Left,
                 bracket_type: BracketType::Curly,
                 ..

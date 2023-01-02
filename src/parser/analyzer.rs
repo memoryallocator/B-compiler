@@ -1,13 +1,15 @@
 use std::cell::Cell;
+use std::cmp::max;
 use std::collections::HashMap;
 use std::ops::Range;
 
 use crate::tokenizer::token;
 use token::{Constant, TokenPos};
 
-use crate::parser;
-use crate::utils::Issue;
-use parser::ast;
+use crate::parser::ast;
+use crate::utils::{FnDef, Issue, NumberOfParameters, StdNameInfo};
+use ast::flat_ast::{FlatDeclarationNameInfo, FlatDefinitionInfo, FlatNode, NameOrConstant};
+use ast::{Lvalue, Rvalue};
 
 #[derive(Debug, Clone)]
 pub(crate) enum ProcessedDeclInfo {
@@ -287,12 +289,12 @@ impl<'a> Analyzer<'a> {
                                     specified_size_plus_1,
                                 })
                             }
-                            cmp::max(ivals_len, specified_size_plus_1)
+                            max(ivals_len, specified_size_plus_1)
                         } else {
                             if ivals_len == 0 {
                                 issues.push(Issue::VecWithNoSizeAndIvals(name.clone(), pos));
                             }
-                            cmp::max(ivals_len, 1)
+                            max(ivals_len, 1)
                         };
                         DefInfo::Vector {
                             size: actual_size.try_into().unwrap(),
@@ -326,12 +328,18 @@ impl<'a> Analyzer<'a> {
 
     fn process_lvalue<'b>(
         &self,
-        lv: &'b ast::LvalueNode,
+        lv: &'b LvalueNode,
         local_scope: &mut LocalScope,
         issues: &mut Vec<Issue>,
-    ) -> Vec<&'b ast::RvalueNode> {
+    ) -> Vec<&'b RvalueNode> {
         match &lv.lvalue {
-            ast::Lvalue::Name(name) => {
+            Lvalue::DerefRvalue(rv) => {
+                vec![rv]
+            }
+            Lvalue::Indexing { vector, index } => {
+                vec![vector, index]
+            }
+            Lvalue::Name(name) => {
                 let info = local_scope.get(name);
                 if info.is_none() {
                     // TODO: suggestions
@@ -342,12 +350,6 @@ impl<'a> Analyzer<'a> {
                 }
                 vec![]
             }
-            ast::Lvalue::DerefRvalue(rv) => {
-                vec![rv]
-            }
-            ast::Lvalue::Indexing { vector, index } => {
-                vec![vector, index]
-            }
         }
     }
 
@@ -357,9 +359,6 @@ impl<'a> Analyzer<'a> {
         local_scope: &mut LocalScope,
         issues: &mut Vec<Issue>,
     ) {
-        use ast::Rvalue::*;
-        use ast::*;
-
         let rvalues_to_process = match rv {
             Constant(_) => vec![],
             Lvalue(lv) => self.process_lvalue(lv, local_scope, issues),

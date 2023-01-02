@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-
-use config_manager::ConfigInit;
 use config_manager::config;
+use config_manager::ConfigInit;
+
+use crate::utils::{Arch, TargetPlatform};
 
 #[derive(Debug)]
 #[config(
@@ -31,9 +32,7 @@ struct InternalConfig {
     stack: u64,
 }
 
-pub(crate) struct Config {
-
-}
+pub(crate) struct Config {}
 
 impl Config {
     pub(crate) fn try_parse() -> Result<Self> {

@@ -3,16 +3,24 @@ use std::cmp::max;
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
 
+use multimap::MultiMap;
+
 use crate::parser;
-use crate::tokenizer::token;
+use crate::tokenizer::token::{
+    BinaryOperation, BinaryRelation, Constant, IncOrDec, LeftOrRight, RichBinaryOperation,
+};
 use crate::utils::CompilerOptions;
-use analyzer::{DefInfo, ProcessedDeclInfo, ScopeTable, VarDefInfo};
-use ast::flat_ast::{FlatDeclarationNameInfo, FlatDefinitionInfo, FlatNode, NameOrConstant};
-use ast::{ConstantNode, FunctionCallNode, IncDecNode, IncDecType, Rvalue, Unary};
 use parser::analyzer;
 use parser::ast;
-use parser::MultiMap;
-use token::{BinaryOperation, Constant, RichBinaryOperation};
+
+use analyzer::get_fns_ranges;
+use analyzer::{DefInfo, GlobalDefinitions, LocalScope, ProcessedDeclInfo, ScopeTable, VarDefInfo};
+use ast::flat_ast::{
+    FlatDeclarationNameInfo, FlatDefinition, FlatDefinitionInfo, FlatNode, FlatNodeAndPos,
+    NameOrConstant,
+};
+use ast::{ConstantNode, FunctionCallNode, IncDecNode, IncDecType, Rvalue, Unary};
+use parser::{DeclInfoAndPos, DefInfoAndPos};
 
 #[derive(Debug)]
 pub(crate) enum Ival {
@@ -233,10 +241,10 @@ impl<'a> IntermediateCodeGenerator<'a> {
         use IntermRepr::*;
         match rv {
             Rvalue::Constant(c) => match &c.constant {
-                token::Constant::Number(x) => {
+                Constant::Number(x) => {
                     vec![LoadConstant(*x)]
                 }
-                token::Constant::String(s) => {
+                Constant::String(s) => {
                     let idx = self.try_add_to_str_pool(s);
                     vec![LoadLvalue(Lvalue::Label(Label::PooledStr(idx)))]
                 }
@@ -370,7 +378,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 } => {
                     let local_var_no = self.name_to_stack_range.total_items().try_into().unwrap();
                     if let Some(ConstantNode {
-                        constant: token::Constant::Number(spec_size),
+                        constant: Constant::Number(spec_size),
                         ..
                     }) = specified_size_if_vec
                     {
@@ -665,8 +673,8 @@ impl<'a> IntermediateCodeGenerator<'a> {
     fn name_or_constant_to_ival(&mut self, x: &NameOrConstant) -> Ival {
         match x {
             NameOrConstant::Name(name) => Ival::Name(Label::Global(name.clone())),
-            NameOrConstant::Constant(token::Constant::Number(n)) => Ival::Number(*n),
-            NameOrConstant::Constant(token::Constant::String(s)) => {
+            NameOrConstant::Constant(Constant::Number(n)) => Ival::Number(*n),
+            NameOrConstant::Constant(Constant::String(s)) => {
                 let idx = self.try_add_to_str_pool(s);
                 Ival::Name(Label::PooledStr(idx))
             }

@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::fmt::{Display, Formatter};
+use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use crate::parser::{DeclInfoAndPos, DefInfoAndPos};
 use crate::tokenizer::token;
@@ -92,7 +92,7 @@ fn def_pos_to_string(def_pos: &Option<TokenPos>) -> String {
 }
 
 impl Display for Issue {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         use Issue::*;
         let msg = match self {
             ParsingError(pos) => {
@@ -317,7 +317,7 @@ pub(crate) enum Arch {
 }
 
 impl Display for Arch {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Arch::x86_64 => write!(f, "x86-64"),
         }
@@ -340,7 +340,7 @@ pub(crate) enum PlatformName {
 }
 
 impl Display for PlatformName {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             PlatformName::Linux => write!(f, "Linux"),
             PlatformName::Windows => write!(f, "Windows"),
@@ -518,7 +518,7 @@ pub(crate) enum NumberOfParameters {
 }
 
 impl Display for NumberOfParameters {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(
             f,
             "{}",
