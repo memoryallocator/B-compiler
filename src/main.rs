@@ -12,10 +12,11 @@ use b_compiler::utils::Issue::{
     DeclShadowsFnParameter, DeclShadowsGlobalDef, DeclShadowsPrevious, InvalidParameterCount,
     UnnecessaryImport, VecTooManyIvals, VecWithNoSizeAndIvals,
 };
+use b_compiler::utils::{get_escape_sequences, get_reserved_symbols};
 
 fn main() -> Result<()> {
     let config = Config::try_parse()?;
-    let source_code = match read_to_string(config.input) {
+    let source_code = match read_to_string(&config.input) {
         Ok(source_code) => source_code,
         Err(err) => {
             return Err(Error::msg(format!(
@@ -25,14 +26,14 @@ fn main() -> Result<()> {
         }
     };
 
-    if !source_code.chars().all(char::is_ascii) {
+    if !source_code.chars().all(|c| c.is_ascii()) {
         return Err(Error::msg("the source code file must be in ASCII"));
     }
 
     let processor = Tokenizer {
         escape_sequences: &get_escape_sequences(),
         reserved_symbols: &get_reserved_symbols(),
-        compiler_options: config,
+        compiler_options: &config,
     };
 
     let mut issues = vec![];
@@ -47,7 +48,7 @@ fn main() -> Result<()> {
     };
 
     let processor = Parser {
-        compiler_options: config,
+        compiler_options: &config,
         source_code: &source_code,
     };
 
@@ -68,13 +69,11 @@ fn main() -> Result<()> {
         at_least_1_error |= is_error;
     }
     if at_least_1_error {
-        return Err(Error::msg(format!(
-            "there were more than 0 errors. Terminating"
-        )));
+        return Err(Error::msg("there were more than 0 errors. Terminating"));
     }
     let scope_table = ast_to_scopes_mapping.unwrap();
 
-    let mut processor = IntermediateCodeGenerator::new(config, &scope_table.global);
+    let mut processor = IntermediateCodeGenerator::new(&config, &scope_table.global);
     let (intermediate_code, pooled_strings) = processor.run(&scope_table);
 
     if config.ir {
@@ -87,7 +86,7 @@ fn main() -> Result<()> {
         );
         return Ok(());
     }
-    let processor = MachineCodeGenerator::new(config, &intermediate_code, pooled_strings);
+    let processor = MachineCodeGenerator::new(&config, &intermediate_code, pooled_strings);
     let res = processor.run();
     println!("{}", res.join("\n"));
     Ok(())

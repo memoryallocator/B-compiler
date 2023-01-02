@@ -18,17 +18,17 @@ mod std_linux_64;
 mod std_win_64;
 
 pub struct MachineCodeGenerator<'a> {
-    pub(crate) compiler_options: CompilerOptions,
+    pub(crate) compiler_options: &'a CompilerOptions,
     intermediate_code: &'a [IntermRepr],
     pooled_strings: HashMap<String, u64>,
 }
 
 fn mangle_global_def(s: &str) -> String {
-    "g!".to_owned() + s
+    "g!".to_string() + s
 }
 
 fn mangle_label(s: &str) -> String {
-    ".".to_owned() + s
+    ".".to_string() + s
 }
 
 fn internal_label(x: u64) -> String {
@@ -40,13 +40,13 @@ fn internal_def(s: &str) -> String {
 }
 
 fn pooled_str_label(idx: u64) -> String {
-    format!("sp!{}", idx.to_string())
+    format!("sp!{idx}")
 }
 
 const START: &str = "start!";
 
 fn pooled_str_end(idx: u64) -> String {
-    format!("s!{}.end", idx.to_string())
+    format!("s!{idx}.end")
 }
 
 fn readonly_section_or_segment(target: TargetPlatform) -> &'static str {
@@ -79,7 +79,7 @@ fn declare_word_directive(word_size: u8) -> &'static str {
 
 impl<'a> MachineCodeGenerator<'a> {
     pub fn new(
-        compiler_options: CompilerOptions,
+        compiler_options: &'a CompilerOptions,
         intermediate_code: &'a [IntermRepr],
         pooled_strings: HashMap<String, u64>,
     ) -> Self {
@@ -105,12 +105,12 @@ impl<'a> MachineCodeGenerator<'a> {
             }
             match info {
                 StdNameInfo::Variable { ival } => {
-                    res.push(readable_writable_section_or_segment(target).to_owned());
+                    res.push(readable_writable_section_or_segment(target).to_string());
                     res.push(format!("{}:", mangle_global_def(name)));
                     res.push(format!("{} {}", declare_word_directive(8), ival))
                 }
                 StdNameInfo::Function(_) => {
-                    res.push(executable_section_or_segment(target).to_owned());
+                    res.push(executable_section_or_segment(target).to_string());
                     res.push(format!("{}:", mangle_global_def(name)));
                     res.push(format!("jmp {}", internal_def(name)));
                 }
@@ -129,10 +129,7 @@ impl<'a> MachineCodeGenerator<'a> {
         let word_size = self.compiler_options.target_platform.arch.word_size() as usize;
         let it = &mut s.chars();
         loop {
-            let mut char: String = it
-                .take(word_size as usize)
-                .take_while(|x| *x as u32 != 4)
-                .collect();
+            let mut char: String = it.take(word_size).take_while(|x| *x as u8 != 4).collect();
             if char.len() == word_size {
                 res.push(char_to_u64(&char));
             } else {
@@ -145,7 +142,7 @@ impl<'a> MachineCodeGenerator<'a> {
     }
 
     fn align_stack(n: u8) -> String {
-        format!("and rsp,-{}", n)
+        format!("and rsp, -{n}")
     }
 
     fn get_lvalue_offset_in_bits(&self) -> u64 {
@@ -156,15 +153,15 @@ impl<'a> MachineCodeGenerator<'a> {
 
     fn align_and_call(&self, nargs: u64) -> Vec<String> {
         let call_conv = self.compiler_options.target_platform.calling_convention();
-        let mut res = vec![];
-        let regs_for_args = &call_conv.registers_to_pass_args;
-        for i in 0..min(nargs as usize, regs_for_args.len()) {
-            res.push(format!("pop {}", regs_for_args[i as usize]));
-        }
-
         let main_reg = call_conv.main_register;
         let reg_for_calls = call_conv.reg_for_calls;
         let word_size = self.compiler_options.target_platform.arch.word_size();
+
+        let mut res = vec![];
+        let regs_for_args = &call_conv.registers_to_pass_args;
+        for reg in regs_for_args.iter().take(nargs as usize) {
+            res.push(format!("pop {reg}"));
+        }
         res.push(format!(
             r"
                 mov {reg_for_calls}, rsp
@@ -223,7 +220,7 @@ impl<'a> MachineCodeGenerator<'a> {
             BinaryOp::Cmp(rel) => {
                 res.push(format!("cmp {},{}", supp_reg, main_reg));
                 let lower_byte = self.get_lower_byte_of_reg(main_reg);
-                let command = "set".to_owned()
+                let command = "set".to_string()
                     + match rel {
                         BinaryRelation::Gt => "g",
                         BinaryRelation::Ne => "ne",
@@ -238,7 +235,7 @@ impl<'a> MachineCodeGenerator<'a> {
 
             BinaryOp::Div | BinaryOp::Mod => {
                 res.push(format!("xchg rax,{}", supp_reg));
-                res.push("cqo".to_owned());
+                res.push("cqo".to_string());
                 res.push(format!("idiv {}", supp_reg));
                 match bin_op {
                     BinaryOp::Div => (),
@@ -283,7 +280,7 @@ impl<'a> MachineCodeGenerator<'a> {
                         BinaryOp::BitwiseAnd => "and",
                         _ => unreachable!(),
                     }
-                    .to_owned()
+                    .to_string()
                         + &format!(" {},{}", supp_reg, main_reg),
                 );
                 res.push(format!("mov {},{}", main_reg, supp_reg));
@@ -307,9 +304,9 @@ impl<'a> MachineCodeGenerator<'a> {
         let mut args_passed_to_curr_fn = None;
 
         let mut res = match target {
-            LINUX_64 => vec!["format ELF64 executable 3".to_owned()],
+            LINUX_64 => vec!["format ELF64 executable 3".to_string()],
             WIN_64 => vec![
-                "format PE64 console".to_owned(),
+                "format PE64 console".to_string(),
                 format!("stack {},{0}", comp_opts.stack_size),
                 format!("heap {},{0}", comp_opts.heap_size),
             ],
@@ -360,7 +357,6 @@ impl<'a> MachineCodeGenerator<'a> {
                                         0
                                     } else {
                                         min(args_passed_to_curr_fn.unwrap(), regs_for_args_len)
-                                            as u64
                                     }
                             ));
                         }
@@ -466,11 +462,11 @@ impl<'a> MachineCodeGenerator<'a> {
                     res.push(format!("mov rsp,{}", reg_for_initial_rsp));
                     res.push(format!("pop {}", reg_for_initial_rsp));
                     res.push(format!("pop {}", reg_for_calls));
-                    res.push("ret".to_owned());
+                    res.push("ret".to_string());
                 }
 
                 IntermRepr::FnDef(name, info) => {
-                    res.push(executable_section_or_segment(target).to_owned());
+                    res.push(executable_section_or_segment(target).to_string());
                     res.push(format!("{}:", mangle_global_def(name)));
 
                     res.push(format!("push {}", reg_for_calls));
@@ -508,7 +504,7 @@ impl<'a> MachineCodeGenerator<'a> {
                     }
                 }
                 IntermRepr::VarOrVecDef(name) => {
-                    res.push(readable_writable_section_or_segment(target).to_owned());
+                    res.push(readable_writable_section_or_segment(target).to_string());
                     res.push(format!("{}:", mangle_global_def(name)));
                     user_defined.insert(name.as_str());
                 }
@@ -529,7 +525,7 @@ impl<'a> MachineCodeGenerator<'a> {
             }
         }
         if !self.pooled_strings.is_empty() {
-            res.push(readonly_section_or_segment(target).to_owned());
+            res.push(readonly_section_or_segment(target).to_string());
             for (s, n) in &self.pooled_strings {
                 res.push(format!("{}:", pooled_str_label(*n)));
                 let s_as_words = self
@@ -538,7 +534,7 @@ impl<'a> MachineCodeGenerator<'a> {
                     .map(|x| x.to_string())
                     .collect::<Vec<String>>()
                     .join(",");
-                res.push(format!("dq {}", s_as_words));
+                res.push(format!("dq {s_as_words}"));
                 res.push(format!("{}:", pooled_str_end(*n)))
             }
         }
@@ -580,12 +576,12 @@ impl<'a> MachineCodeGenerator<'a> {
                     db 'WriteFile',0
                 _GetCommandLineA dw 0
                     db 'GetCommandLineA',0"
-                    .to_owned(),
+                    .to_string(),
             )
         }
         res.into_iter().fold(vec![], |mut acc, x| {
             acc.extend(x.split('\n').filter_map(|x| {
-                let x = x.trim().to_owned();
+                let x = x.trim().to_string();
                 if !x.is_empty() {
                     Some(x)
                 } else {

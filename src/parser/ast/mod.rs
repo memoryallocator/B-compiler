@@ -64,14 +64,14 @@ pub(crate) struct AutoDeclaration {
 
 #[derive(Debug)]
 pub(crate) struct AutoDeclarationNode {
-    pub(crate) position: TokenPos,
+    pub(crate) _position: TokenPos,
     pub(crate) declarations: Vec<AutoDeclaration>,
     pub(crate) next_statement: StatementNode,
 }
 
 #[derive(Debug)]
 pub(crate) struct ExternDeclarationNode {
-    pub(crate) position: TokenPos,
+    pub(crate) _position: TokenPos,
     pub(crate) names: Vec<(String, TokenPos)>,
     pub(crate) next_statement: StatementNode,
 }

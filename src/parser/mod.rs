@@ -423,7 +423,7 @@ impl Parse for AutoDeclarationNode {
             let (stmt_node, adv) = StatementNode::parse(&input[next_statement_starts_at..])?;
             Ok((
                 AutoDeclarationNode {
-                    position: *pos,
+                    _position: *pos,
                     declarations,
                     next_statement: stmt_node,
                 },
@@ -500,7 +500,7 @@ impl Parse for ExternDeclarationNode {
             let (next_stmt, adv) = StatementNode::parse(&input[next_statement_starts_at..])?;
             Ok((
                 ExternDeclarationNode {
-                    position: input[0].pos,
+                    _position: input[0].pos,
                     names,
                     next_statement: next_stmt,
                 },
@@ -1139,7 +1139,7 @@ impl Parse for ProgramNode {
 impl ParseExact for ProgramNode {}
 
 pub struct Parser<'a> {
-    pub compiler_options: CompilerOptions,
+    pub compiler_options: &'a CompilerOptions,
     pub source_code: &'a str,
 }
 
@@ -1204,16 +1204,16 @@ impl Parser<'_> {
         Err(BracketsError::NotClosed(*stack.pop().unwrap().1))
     }
 
-    pub fn run(&self, tokens: &[Token], issues: &mut Vec<Issue>) -> Result<ScopeTable, ()> {
+    pub fn run(&self, tokens: &[Token], issues: &mut Vec<Issue>) -> Option<ScopeTable> {
         let tokens = match Parser::find_bracket_pairs(tokens.iter()) {
             Ok(processed_tokens) => processed_tokens,
             Err(BracketsError::NotClosed(pos)) => {
                 issues.push(Issue::BracketNotClosed(pos));
-                return Err(());
+                return None;
             }
             Err(BracketsError::NotOpened(pos)) => {
                 issues.push(Issue::BracketNotOpened(pos));
-                return Err(());
+                return None;
             }
         };
         if tokens.is_empty() {
@@ -1224,12 +1224,12 @@ impl Parser<'_> {
         match prog_node {
             Err(err) => {
                 issues.extend(err);
-                Err(())
+                None
             }
             Ok(prog_node) => {
                 let res = prog_node.flatten_node();
                 let mut analyzer = Analyzer::new(self.source_code);
-                Ok(analyzer.run(&res, issues))
+                Some(analyzer.run(&res, issues))
             }
         }
     }

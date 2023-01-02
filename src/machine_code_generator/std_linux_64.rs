@@ -24,7 +24,7 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
         ]
         .into_iter(),
     );
-    let mut res = vec![executable_section_or_segment(TARGET).to_owned()];
+    let mut res = vec![executable_section_or_segment(TARGET).to_string()];
 
     for (name, info) in get_standard_library_names() {
         if let StdNameInfo::Variable { .. } = info {
@@ -90,7 +90,7 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                     rol rsi, 3
                     movzx rax, BYTE [rsi + rdx]
                     ret"
-            .to_owned(),
+            .to_string(),
 
             "getvec" => {
                 const PROT_READ: i32 = 0x1;
@@ -285,14 +285,14 @@ pub(crate) fn generate_std_lib_and_internals() -> Vec<String> {
                 )
             }
 
-            _ => "dq 0".to_owned(),
+            _ => "dq 0".to_string(),
         });
     }
 
-    res.push(executable_section_or_segment(TARGET).to_owned());
+    res.push(executable_section_or_segment(TARGET).to_string());
     res.push(format!("{}:", START));
     res.push(MachineCodeGenerator::align_stack(call_conv.alignment));
-    res.push("xor rdi, rdi".to_owned());
+    res.push("xor rdi, rdi".to_string());
     res.push(format!("call {}", mangle_global_def("main")));
     res.push(format!("jmp {}", mangle_global_def("exit")));
     res

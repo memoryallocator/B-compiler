@@ -11,7 +11,7 @@ pub mod token;
 pub struct Tokenizer<'a> {
     pub escape_sequences: &'a HashMap<String, String>,
     pub reserved_symbols: &'a ReservedSymbolsTable,
-    pub compiler_options: CompilerOptions,
+    pub compiler_options: &'a CompilerOptions,
 }
 
 fn parse_assign_binary_operator(s: &str) -> Option<(RichBinaryOperation, usize)> {
@@ -312,8 +312,7 @@ impl Tokenizer<'_> {
                             continue;
                         } else {
                             return Err(format!(
-                                "{}: unknown character encountered: {}",
-                                token_pos, curr_char as char
+                                "{token_pos}: unknown character encountered: {curr_char}",
                             ));
                         }
                     }

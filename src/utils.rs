@@ -150,7 +150,7 @@ impl Display for Issue {
                 )
             }
 
-            EmptyTokenStream => "failed to recognize a single token".to_owned(),
+            EmptyTokenStream => "failed to recognize a single token".to_string(),
 
             FailedToParseExact(pos) => {
                 format!("failed to parse construct at {}", pos)
@@ -295,7 +295,7 @@ impl Display for Issue {
                 format!("the literal at {} is too long", pos)
             }
 
-            NoMainFn => "no main function found".to_owned(),
+            NoMainFn => "no main function found".to_string(),
 
             InvalidParameterCount {
                 expected,
@@ -442,7 +442,7 @@ impl TargetPlatform {
 
 pub(crate) type CompilerOptions = Config;
 
-pub(crate) fn get_escape_sequences() -> HashMap<String, String> {
+pub fn get_escape_sequences() -> HashMap<String, String> {
     vec![
         ('0', '\0'),
         ('e', 4 as char), // ASCII EOT, string terminator in B),
@@ -461,7 +461,7 @@ pub(crate) fn get_escape_sequences() -> HashMap<String, String> {
 
 pub type ReservedSymbolsTable = HashMap<String, ReservedName>;
 
-pub(crate) fn get_reserved_symbols() -> ReservedSymbolsTable {
+pub fn get_reserved_symbols() -> ReservedSymbolsTable {
     vec![
         (
             "auto",

@@ -151,7 +151,7 @@ pub enum IntermRepr {
 }
 
 pub struct IntermediateCodeGenerator<'a> {
-    pub(crate) compiler_options: CompilerOptions,
+    pub(crate) compiler_options: &'a CompilerOptions,
     label_counter: RangeInclusive<u64>,
     str_pool: Cell<HashMap<String, u64>>,
     global_definitions: &'a GlobalDefinitions,
@@ -184,7 +184,7 @@ fn is_regular_node(node: &FlatNode) -> bool {
 
 impl<'a> IntermediateCodeGenerator<'a> {
     pub fn new(
-        compiler_options: CompilerOptions,
+        compiler_options: &'a CompilerOptions,
         global_definitions: &'a GlobalDefinitions,
     ) -> Self {
         IntermediateCodeGenerator {

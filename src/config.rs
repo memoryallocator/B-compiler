@@ -15,6 +15,8 @@ use crate::utils::{Arch, PlatformName, TargetPlatform};
     )
 )]
 struct InternalConfig {
+    #[source(clap(long, short), env, config)]
+    input: String,
     #[source(clap(long), env, config)]
     ir: bool,
     #[source(clap(long, short), env, config)]
@@ -29,8 +31,9 @@ struct InternalConfig {
     stack_size: u64,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct Config {
+    pub input: String,
     pub ir: bool,
     pub(crate) target_platform: TargetPlatform,
     pub(crate) enable_continue: bool,
@@ -43,6 +46,7 @@ impl Config {
         let config = InternalConfig::parse()?;
 
         let InternalConfig {
+            input,
             ir,
             arch,
             target_platform_name,
@@ -76,6 +80,7 @@ impl Config {
         };
 
         Ok(Self {
+            input,
             ir,
             target_platform,
             enable_continue,

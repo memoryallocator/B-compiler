@@ -60,7 +60,7 @@ pub struct ScopeTable {
 }
 
 pub(crate) struct Analyzer<'a> {
-    pub(crate) source_code: &'a str,
+    pub(crate) _source_code: &'a str,
     global_scope: Cell<GlobalDefinitions>,
 }
 
@@ -97,7 +97,7 @@ where
 impl<'a> Analyzer<'a> {
     pub(crate) fn new(source_code: &'a str) -> Self {
         Analyzer {
-            source_code,
+            _source_code: source_code,
             global_scope: Default::default(),
         }
     }
