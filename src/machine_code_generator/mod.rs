@@ -1,6 +1,3 @@
-mod std_linux_64;
-mod std_win_64;
-
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 
@@ -9,10 +6,16 @@ use crate::intermediate_code_generator::{
 };
 use crate::parser::ast::IncDecType;
 use crate::tokenizer;
-use crate::utils::{Arch, CompilerOptions, StdNameInfo};
+use crate::utils;
 
 use tokenizer::char_to_u64;
 use tokenizer::token::{BinaryRelation, IncOrDec, LeftOrRight};
+use utils::get_standard_library_names;
+use utils::{Arch, CompilerOptions, StdNameInfo, TargetPlatform};
+use utils::{LINUX_64, WIN_64};
+
+mod std_linux_64;
+mod std_win_64;
 
 pub(crate) struct MachineCodeGenerator<'a> {
     pub(crate) compiler_options: CompilerOptions,
@@ -522,7 +525,7 @@ impl<'a> MachineCodeGenerator<'a> {
                         Label::PooledStr(s) => res.push(format!("dq {}", pooled_str_label(*s))),
                     },
                 },
-                BinOp(bin_op) => res.extend(self.bin_op_to_machine_code(*bin_op)),
+                IntermRepr::BinOp(bin_op) => res.extend(self.bin_op_to_machine_code(*bin_op)),
             }
         }
         if !self.pooled_strings.is_empty() {

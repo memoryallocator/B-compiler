@@ -5,7 +5,7 @@ use crate::parser::{DeclInfoAndPos, DefInfoAndPos};
 use crate::tokenizer::token;
 use token::{LeftOrRight, Operator, ReservedName, TokenPos};
 
-pub(crate) enum Issue {
+pub enum Issue {
     BracketNotOpened(TokenPos),
     BracketNotClosed(TokenPos),
     EmptyTokenStream,
@@ -418,10 +418,7 @@ impl TargetPlatform {
                 PlatformName::Windows
             } else {
                 let default_platform = TargetPlatform::default().platform_name;
-                println!(
-                    "Failed to determine the native OS. Assuming it's {}",
-                    default_platform
-                );
+                println!("Failed to determine the native OS. Assuming it's {default_platform}");
                 default_platform
             },
             arch: {
@@ -432,8 +429,7 @@ impl TargetPlatform {
                 } else {
                     let default_arch = TargetPlatform::default().arch;
                     println!(
-                        "Failed to determine the native architecture. Assuming it's {}",
-                        default_arch
+                        "Failed to determine the native architecture. Assuming it's {default_arch}"
                     );
                     default_arch
                 }
@@ -512,7 +508,7 @@ pub(crate) fn get_reserved_symbols() -> ReservedSymbolsTable {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub(crate) enum NumberOfParameters {
+pub enum NumberOfParameters {
     Exact(usize),
     AtLeast(usize),
 }

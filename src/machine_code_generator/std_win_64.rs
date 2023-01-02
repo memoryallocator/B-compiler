@@ -1,4 +1,14 @@
-use crate::utils::{StdNameInfo, TargetPlatform, WIN_64};
+use crate::machine_code_generator;
+use crate::utils;
+
+use machine_code_generator::MachineCodeGenerator;
+use machine_code_generator::START;
+use machine_code_generator::{
+    executable_section_or_segment, internal_def, mangle_global_def,
+    readable_writable_section_or_segment,
+};
+use utils::get_standard_library_names;
+use utils::{StdNameInfo, TargetPlatform, WIN_64};
 
 const TARGET: TargetPlatform = WIN_64;
 

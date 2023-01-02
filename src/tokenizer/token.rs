@@ -57,7 +57,7 @@ impl Bracket {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
-pub(crate) enum LeftOrRight {
+pub enum LeftOrRight {
     Left,
     Right,
 }
@@ -82,7 +82,7 @@ pub(crate) enum Constant {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum UnaryOperation {
+pub enum UnaryOperation {
     LogicalNot,
     Complement,
 }
@@ -101,7 +101,7 @@ impl Display for UnaryOperation {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
-pub(crate) enum BinaryRelation {
+pub enum BinaryRelation {
     Gt,
     Eq,
     Lt,
@@ -128,7 +128,7 @@ impl Display for BinaryRelation {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
-pub(crate) enum BinaryOperation {
+pub enum BinaryOperation {
     Div,
     Mod,
     Or,
@@ -212,7 +212,7 @@ pub(crate) enum DeclarationSpecifier {
 }
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug, Hash)]
-pub(crate) struct Assign {
+pub struct Assign {
     pub(crate) bin_op: Option<RichBinaryOperation>,
 }
 
@@ -229,13 +229,13 @@ impl From<RichBinaryOperation> for Assign {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub(crate) enum IncOrDec {
+pub enum IncOrDec {
     Increment,
     Decrement,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum Operator {
+pub enum Operator {
     Plus,
     Minus,
     Asterisk,
@@ -318,7 +318,7 @@ pub(crate) enum WrappedToken {
 }
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug, Hash, PartialOrd)]
-pub(crate) struct TokenPos {
+pub struct TokenPos {
     pub(crate) line: usize,
     pub(crate) column: usize,
 }

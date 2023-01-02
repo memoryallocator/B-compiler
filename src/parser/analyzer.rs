@@ -3,13 +3,18 @@ use std::cmp::max;
 use std::collections::HashMap;
 use std::ops::Range;
 
-use crate::tokenizer::token;
-use token::{Constant, TokenPos};
-
 use crate::parser::ast;
-use crate::utils::{FnDef, Issue, NumberOfParameters, StdNameInfo};
-use ast::flat_ast::{FlatDeclarationNameInfo, FlatDefinitionInfo, FlatNode, NameOrConstant};
-use ast::{Lvalue, Rvalue};
+use crate::tokenizer::token;
+use crate::utils;
+
+use ast::flat_ast::{
+    FlatDeclaration, FlatDeclarationNameInfo, FlatDefinition, FlatDefinitionInfo, FlatNode,
+    FlatNodeAndPos, Ival, NameOrConstant,
+};
+use ast::{Lvalue, LvalueNode, Rvalue, RvalueNode};
+use token::{Constant, TokenPos};
+use utils::get_standard_library_names;
+use utils::{FnDef, Issue, NumberOfParameters, StdNameInfo};
 
 #[derive(Debug, Clone)]
 pub(crate) enum ProcessedDeclInfo {
@@ -34,13 +39,13 @@ pub(crate) enum DefInfo {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct DefInfoAndPos {
+pub struct DefInfoAndPos {
     pub(crate) pos_if_user_defined: Option<TokenPos>,
     pub(crate) info: DefInfo,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct DeclInfoAndPos {
+pub struct DeclInfoAndPos {
     pub(crate) pos: TokenPos,
     pub(crate) info: ProcessedDeclInfo,
 }
@@ -355,24 +360,24 @@ impl<'a> Analyzer<'a> {
 
     fn process_rvalue(
         &mut self,
-        rv: &ast::Rvalue,
+        rv: &Rvalue,
         local_scope: &mut LocalScope,
         issues: &mut Vec<Issue>,
     ) {
         let rvalues_to_process = match rv {
-            Constant(_) => vec![],
-            Lvalue(lv) => self.process_lvalue(lv, local_scope, issues),
-            Assign { lhs, rhs, .. } => {
+            Rvalue::Constant(_) => vec![],
+            Rvalue::Lvalue(lv) => self.process_lvalue(lv, local_scope, issues),
+            Rvalue::Assign { lhs, rhs, .. } => {
                 let mut rvs_to_pr = self.process_lvalue(lhs, local_scope, issues);
                 rvs_to_pr.push(rhs);
                 rvs_to_pr
             }
-            IncDec(node) => self.process_lvalue(&node.lvalue, local_scope, issues),
+            Rvalue::IncDec(node) => self.process_lvalue(&node.lvalue, local_scope, issues),
 
-            Unary(_, rv) => vec![rv],
-            TakeAddress(lv) => self.process_lvalue(lv, local_scope, issues),
-            Binary { lhs, rhs, .. } => vec![lhs, rhs],
-            ConditionalExpression {
+            Rvalue::Unary(_, rv) => vec![rv],
+            Rvalue::TakeAddress(lv) => self.process_lvalue(lv, local_scope, issues),
+            Rvalue::Binary { lhs, rhs, .. } => vec![lhs, rhs],
+            Rvalue::ConditionalExpression {
                 condition,
                 on_true,
                 on_false,
@@ -381,8 +386,8 @@ impl<'a> Analyzer<'a> {
                 vec![condition, on_true, on_false]
             }
 
-            BracketedExpression(expr) => vec![expr],
-            FunctionCall(fn_call) => {
+            Rvalue::BracketedExpression(expr) => vec![expr],
+            Rvalue::FunctionCall(fn_call) => {
                 let mut rvalue_to_process = vec![];
                 if let Rvalue::Lvalue(LvalueNode {
                     position,

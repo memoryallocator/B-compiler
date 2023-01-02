@@ -10,8 +10,6 @@ use crate::tokenizer::token::{
     BinaryOperation, BinaryRelation, Constant, IncOrDec, LeftOrRight, RichBinaryOperation,
 };
 use crate::utils::CompilerOptions;
-use parser::analyzer;
-use parser::ast;
 
 use analyzer::get_fns_ranges;
 use analyzer::{DefInfo, GlobalDefinitions, LocalScope, ProcessedDeclInfo, ScopeTable, VarDefInfo};
@@ -19,7 +17,11 @@ use ast::flat_ast::{
     FlatDeclarationNameInfo, FlatDefinition, FlatDefinitionInfo, FlatNode, FlatNodeAndPos,
     NameOrConstant,
 };
-use ast::{ConstantNode, FunctionCallNode, IncDecNode, IncDecType, Rvalue, Unary};
+use ast::{
+    ConstantNode, FunctionCallNode, IncDecNode, IncDecType, Lvalue as AstLvalue, Rvalue, Unary,
+};
+use parser::analyzer;
+use parser::ast;
 use parser::{DeclInfoAndPos, DefInfoAndPos};
 
 #[derive(Debug)]
@@ -196,11 +198,10 @@ impl<'a> IntermediateCodeGenerator<'a> {
         }
     }
 
-    fn process_lvalue(&mut self, lv: &ast::Lvalue) -> Vec<IntermRepr> {
-        use IntermRepr::*;
+    fn process_lvalue(&mut self, lv: &AstLvalue) -> Vec<IntermRepr> {
         match lv {
-            ast::Lvalue::Name(name) => {
-                vec![LoadLvalue(
+            AstLvalue::Name(name) => {
+                vec![IntermRepr::LoadLvalue(
                     if let Some(info) = self.local_scope.unwrap().get(name) {
                         match info.info {
                             ProcessedDeclInfo::Label => Lvalue::Label(Label::Local(name.clone())),
@@ -212,10 +213,10 @@ impl<'a> IntermediateCodeGenerator<'a> {
                                 Lvalue::Label(Label::Global(name.clone()))
                             }
                             ProcessedDeclInfo::Auto { .. } => {
-                                if let Some((_, st)) =
-                                    self.name_to_stack_range.get_last(&Some(name))
+                                if let Some(stack_ranges) =
+                                    self.name_to_stack_range.get_vec(&Some(name))
                                 {
-                                    Lvalue::LocalVar(st.clone())
+                                    Lvalue::LocalVar(stack_ranges.last().unwrap().1.clone())
                                 } else {
                                     unreachable!()
                                 }
@@ -226,12 +227,12 @@ impl<'a> IntermediateCodeGenerator<'a> {
                     },
                 )]
             }
-            ast::Lvalue::DerefRvalue(rv) => self.process_rvalue(&rv.rvalue),
-            ast::Lvalue::Indexing { vector, index } => {
+            AstLvalue::DerefRvalue(rv) => self.process_rvalue(&rv.rvalue),
+            AstLvalue::Indexing { vector, index } => {
                 let mut res = self.process_rvalue(&vector.rvalue);
-                res.push(Save);
+                res.push(IntermRepr::Save);
                 res.extend(self.process_rvalue(&index.rvalue));
-                res.push(BinOp(BinaryOp::Add));
+                res.push(IntermRepr::BinOp(BinaryOp::Add));
                 res
             }
         }
@@ -364,19 +365,23 @@ impl<'a> IntermediateCodeGenerator<'a> {
         curr_fn: &mut FnInfo,
         node: &'a FlatNode,
     ) -> Vec<IntermRepr> {
-        use IntermRepr::*;
         debug_assert!(is_regular_node(node));
         match node {
             FlatNode::Decl(decl) => match &decl.info {
                 FlatDeclarationNameInfo::Extern => vec![],
                 FlatDeclarationNameInfo::Label => {
-                    vec![DeclLabel(decl.name.clone())]
+                    vec![IntermRepr::DeclLabel(decl.name.clone())]
                 }
 
                 FlatDeclarationNameInfo::Auto {
                     specified_size_if_vec,
                 } => {
-                    let local_var_no = self.name_to_stack_range.total_items().try_into().unwrap();
+                    let local_var_no = self
+                        .name_to_stack_range
+                        .iter_all()
+                        .fold(0, |acc, (_, values)| acc + values.len())
+                        .try_into()
+                        .unwrap();
                     if let Some(ConstantNode {
                         constant: Constant::Number(spec_size),
                         ..
@@ -410,8 +415,8 @@ impl<'a> IntermediateCodeGenerator<'a> {
                     debug_assert!(after_both_branches.is_none());
                     *after_both_branches = Some(after_else_body);
                     vec![
-                        Jump(after_else_body),
-                        InternalLabel(*condition_is_false_label),
+                        IntermRepr::Jump(after_else_body),
+                        IntermRepr::InternalLabel(*condition_is_false_label),
                     ]
                 } else {
                     unreachable!()
@@ -427,7 +432,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                     after_last_stmt, ..
                 } = last_br_stmt
                 {
-                    vec![Jump(*after_last_stmt)]
+                    vec![IntermRepr::Jump(*after_last_stmt)]
                 } else {
                     unreachable!()
                 }
@@ -439,14 +444,14 @@ impl<'a> IntermediateCodeGenerator<'a> {
                     check_cond_label, ..
                 } = last_wh_stmt
                 {
-                    vec![Jump(*check_cond_label)]
+                    vec![IntermRepr::Jump(*check_cond_label)]
                 } else {
                     unreachable!()
                 }
             }
             FlatNode::Goto(rv) => {
                 let mut res = self.process_rvalue(rv);
-                res.push(Goto);
+                res.push(IntermRepr::Goto);
                 res
             }
             FlatNode::Case(constant) => {
@@ -472,7 +477,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                         debug_assert!(default_case_label.is_none());
                         *default_case_label = Some(label_no);
                     }
-                    vec![InternalLabel(label_no)]
+                    vec![IntermRepr::InternalLabel(label_no)]
                 } else {
                     unreachable!()
                 }
@@ -482,7 +487,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 if let Some(rv) = rv {
                     res.extend(self.process_rvalue(rv));
                 }
-                res.push(Ret);
+                res.push(IntermRepr::Ret);
                 res
             }
             _ => unreachable!(),

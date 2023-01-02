@@ -164,10 +164,12 @@ impl FlattenNode for FunctionDefinitionNode {
 impl FlattenNode for StatementNode {
     fn flatten_node(self) -> Vec<FlatNodeAndPos> {
         let append_end_marker = {
-            use Statement::*;
             matches!(
                 self.statement.as_ref(),
-                Compound(_) | Switch(_) | If(_) | While(_)
+                Statement::Compound(_)
+                    | Statement::Switch(_)
+                    | Statement::If(_)
+                    | Statement::While(_)
             )
         };
         let mut res = match *self.statement {
