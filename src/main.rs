@@ -25,7 +25,7 @@ fn main() -> Result<()> {
         }
     };
 
-    if !source_code.chars().all(|c| c.is_ascii()) {
+    if !source_code.chars().all(char::is_ascii) {
         return Err(Error::msg("the source code file must be in ASCII"));
     }
 
@@ -54,7 +54,7 @@ fn main() -> Result<()> {
     let ast_to_scopes_mapping = processor.run(&tokens, &mut issues);
     let mut at_least_1_error = false;
     for issue in issues {
-        let error = !matches!(
+        let is_error = !matches!(
             issue,
             VecWithNoSizeAndIvals(..)
                 | VecTooManyIvals { .. }
@@ -64,8 +64,8 @@ fn main() -> Result<()> {
                 | DeclShadowsPrevious { .. }
                 | InvalidParameterCount { .. }
         );
-        eprintln!("{}: {}", if error { "error" } else { "warning" }, issue);
-        at_least_1_error |= error;
+        eprintln!("{}: {}", if is_error { "error" } else { "warning" }, issue);
+        at_least_1_error |= is_error;
     }
     if at_least_1_error {
         return Err(Error::msg(format!(
