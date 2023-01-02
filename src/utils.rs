@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
+use crate::config::Config;
 use crate::parser::{DeclInfoAndPos, DefInfoAndPos};
-use crate::tokenizer::token;
-use token::{LeftOrRight, Operator, ReservedName, TokenPos};
+use crate::tokenizer::token::{
+    CtrlStmtIdent, DeclarationSpecifier, LeftOrRight, Operator, ReservedName, TokenPos,
+};
 
 pub enum Issue {
     BracketNotOpened(TokenPos),
@@ -438,32 +440,7 @@ impl TargetPlatform {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub(crate) enum Mode {
-    Ir,
-    Default,
-}
-
-#[derive(Copy, Clone)]
-pub(crate) struct CompilerOptions {
-    pub(crate) target_platform: TargetPlatform,
-    pub(crate) stack_size: u64,
-    pub(crate) heap_size: u64,
-    pub(crate) continue_is_enabled: bool,
-    pub(crate) mode: Mode,
-}
-
-impl Default for CompilerOptions {
-    fn default() -> Self {
-        CompilerOptions {
-            target_platform: TargetPlatform::native(),
-            stack_size: 4096,
-            heap_size: 65536,
-            continue_is_enabled: false,
-            mode: Mode::Default,
-        }
-    }
-}
+pub(crate) type CompilerOptions = Config;
 
 pub(crate) fn get_escape_sequences() -> HashMap<String, String> {
     vec![
@@ -482,25 +459,28 @@ pub(crate) fn get_escape_sequences() -> HashMap<String, String> {
     .collect()
 }
 
-pub(crate) type ReservedSymbolsTable = HashMap<String, ReservedName>;
+pub type ReservedSymbolsTable = HashMap<String, ReservedName>;
 
 pub(crate) fn get_reserved_symbols() -> ReservedSymbolsTable {
-    use token::CtrlStmtIdent::*;
-    use token::DeclarationSpecifier::*;
-
     vec![
-        ("auto", ReservedName::DeclarationSpecifier(Auto)),
-        ("extrn", ReservedName::DeclarationSpecifier(Extrn)),
-        ("goto", ReservedName::CtrlStmt(Goto)),
-        ("switch", ReservedName::CtrlStmt(Switch)),
-        ("case", ReservedName::CtrlStmt(Case)),
-        ("return", ReservedName::CtrlStmt(Return)),
-        ("if", ReservedName::CtrlStmt(If)),
-        ("else", ReservedName::CtrlStmt(Else)),
-        ("while", ReservedName::CtrlStmt(While)),
-        ("break", ReservedName::CtrlStmt(Break)),
-        ("continue", ReservedName::CtrlStmt(Continue)),
-        ("default", ReservedName::CtrlStmt(Default)),
+        (
+            "auto",
+            ReservedName::DeclarationSpecifier(DeclarationSpecifier::Auto),
+        ),
+        (
+            "extrn",
+            ReservedName::DeclarationSpecifier(DeclarationSpecifier::Extrn),
+        ),
+        ("goto", ReservedName::CtrlStmt(CtrlStmtIdent::Goto)),
+        ("switch", ReservedName::CtrlStmt(CtrlStmtIdent::Switch)),
+        ("case", ReservedName::CtrlStmt(CtrlStmtIdent::Case)),
+        ("return", ReservedName::CtrlStmt(CtrlStmtIdent::Return)),
+        ("if", ReservedName::CtrlStmt(CtrlStmtIdent::If)),
+        ("else", ReservedName::CtrlStmt(CtrlStmtIdent::Else)),
+        ("while", ReservedName::CtrlStmt(CtrlStmtIdent::While)),
+        ("break", ReservedName::CtrlStmt(CtrlStmtIdent::Break)),
+        ("continue", ReservedName::CtrlStmt(CtrlStmtIdent::Continue)),
+        ("default", ReservedName::CtrlStmt(CtrlStmtIdent::Default)),
     ]
     .into_iter()
     .map(|x| (x.0.to_string(), x.1))

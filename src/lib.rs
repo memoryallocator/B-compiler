@@ -1,6 +1,6 @@
 pub mod config;
-mod intermediate_code_generator;
-mod machine_code_generator;
-mod parser;
-mod tokenizer;
+pub mod intermediate_code_generator;
+pub mod machine_code_generator;
+pub mod parser;
+pub mod tokenizer;
 pub mod utils;

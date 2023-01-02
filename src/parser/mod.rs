@@ -1138,9 +1138,9 @@ impl Parse for ProgramNode {
 
 impl ParseExact for ProgramNode {}
 
-pub(crate) struct Parser<'a> {
-    pub(crate) compiler_options: CompilerOptions,
-    pub(crate) source_code: &'a str,
+pub struct Parser<'a> {
+    pub compiler_options: CompilerOptions,
+    pub source_code: &'a str,
 }
 
 #[derive(PartialEq)]
@@ -1204,7 +1204,7 @@ impl Parser<'_> {
         Err(BracketsError::NotClosed(*stack.pop().unwrap().1))
     }
 
-    pub(crate) fn run(&self, tokens: &[Token], issues: &mut Vec<Issue>) -> Result<ScopeTable, ()> {
+    pub fn run(&self, tokens: &[Token], issues: &mut Vec<Issue>) -> Result<ScopeTable, ()> {
         let tokens = match Parser::find_bracket_pairs(tokens.iter()) {
             Ok(processed_tokens) => processed_tokens,
             Err(BracketsError::NotClosed(pos)) => {

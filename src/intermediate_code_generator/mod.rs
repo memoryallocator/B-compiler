@@ -25,27 +25,27 @@ use parser::ast;
 use parser::{DeclInfoAndPos, DefInfoAndPos};
 
 #[derive(Debug)]
-pub(crate) enum Ival {
+pub enum Ival {
     Name(Label),
     Number(u64),
     ReserveWords(u64),
 }
 
 #[derive(Debug)]
-pub(crate) struct FnInfo {
+pub struct FnInfo {
     pub(crate) stack_size: u64,
     pub(crate) num_of_params: u64,
 }
 
 #[derive(Debug)]
-pub(crate) enum Label {
+pub enum Label {
     Local(String),
     Global(String),
     PooledStr(u64),
 }
 
 #[derive(Debug)]
-pub(crate) enum Lvalue {
+pub enum Lvalue {
     NthArg(u64),
     LocalVar(StackRange),
     Label(Label),
@@ -79,20 +79,20 @@ enum StmtRequiringEndMarker<'a> {
 }
 
 #[derive(Debug)]
-pub(crate) struct IncDec {
+pub struct IncDec {
     pub(crate) inc_or_dec: IncOrDec,
     pub(crate) inc_dec_type: IncDecType,
 }
 
 #[derive(Debug)]
-pub(crate) enum RvalueUnary {
+pub enum RvalueUnary {
     LogicalNot,
     Minus,
     Complement,
 }
 
 #[derive(Debug, Copy, Clone)]
-pub(crate) enum BinaryOp {
+pub enum BinaryOp {
     Div,
     Mod,
     Or,
@@ -128,7 +128,7 @@ impl From<RichBinaryOperation> for BinaryOp {
 }
 
 #[derive(Debug)]
-pub(crate) enum IntermRepr {
+pub enum IntermRepr {
     FnDef(String, FnInfo),
     VarOrVecDef(String),
     Ival(Ival),
@@ -150,7 +150,7 @@ pub(crate) enum IntermRepr {
     Ret,
 }
 
-pub(crate) struct IntermediateCodeGenerator<'a> {
+pub struct IntermediateCodeGenerator<'a> {
     pub(crate) compiler_options: CompilerOptions,
     label_counter: RangeInclusive<u64>,
     str_pool: Cell<HashMap<String, u64>>,
@@ -165,21 +165,25 @@ pub(crate) struct IntermediateCodeGenerator<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum StackRange {
+pub enum StackRange {
     Exact(u64),
     Span(RangeInclusive<u64>),
 }
 
 fn is_regular_node(node: &FlatNode) -> bool {
-    use FlatNode::*;
     !matches!(
         node,
-        Compound | If(_) | While(_) | Switch(_) | Def(_) | EndOfStmt { .. },
+        FlatNode::Compound
+            | FlatNode::If(_)
+            | FlatNode::While(_)
+            | FlatNode::Switch(_)
+            | FlatNode::Def(_)
+            | FlatNode::EndOfStmt { .. },
     )
 }
 
 impl<'a> IntermediateCodeGenerator<'a> {
-    pub(crate) fn new(
+    pub fn new(
         compiler_options: CompilerOptions,
         global_definitions: &'a GlobalDefinitions,
     ) -> Self {
@@ -632,7 +636,6 @@ impl<'a> IntermediateCodeGenerator<'a> {
     ) -> (Vec<IntermRepr>, usize) {
         self.reset_everything_except_str_pool();
         let mut res = vec![];
-        use IntermRepr::*;
         if let FlatNode::Def(FlatDefinition {
             name,
             info: FlatDefinitionInfo::Function { params },
@@ -643,7 +646,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
                 .enumerate()
                 .map(|(i, (param, _))| (param, i.try_into().unwrap()))
                 .collect();
-            res.push(FnDef(
+            res.push(IntermRepr::FnDef(
                 name.clone(),
                 FnInfo {
                     stack_size: 0,
@@ -654,14 +657,14 @@ impl<'a> IntermediateCodeGenerator<'a> {
             unreachable!()
         }
 
-        let curr_fn = if let FnDef(_, info) = &mut res[0] {
+        let curr_fn = if let IntermRepr::FnDef(_, info) = &mut res[0] {
             info
         } else {
             unreachable!()
         };
         let (rest_of_nodes, adv) = self.process_slice(curr_fn, &prog_slice[1..]);
         res.extend(rest_of_nodes);
-        res.push(Ret);
+        res.push(IntermRepr::Ret);
         (res, adv + 1)
     }
 
@@ -686,10 +689,7 @@ impl<'a> IntermediateCodeGenerator<'a> {
         }
     }
 
-    pub(crate) fn run(
-        &mut self,
-        program: &'a ScopeTable,
-    ) -> (Vec<IntermRepr>, HashMap<String, u64>) {
+    pub fn run(&mut self, program: &'a ScopeTable) -> (Vec<IntermRepr>, HashMap<String, u64>) {
         let mut res = vec![];
         for (name, def) in &program.global {
             match &def.info {

@@ -24,27 +24,37 @@ struct InternalConfig {
     #[source(clap(long), env, config)]
     enable_continue: bool,
     #[source(clap(long, short), env, config)]
-    heap: u64,
+    heap_size: u64,
     #[source(clap(long, short), env, config)]
-    stack: u64,
+    stack_size: u64,
 }
 
+#[derive(Copy, Clone)]
 pub struct Config {
-    ir: bool,
-    target_platform: TargetPlatform,
-    enable_continue: bool,
-    heap: u64,
-    stack: u64,
+    pub ir: bool,
+    pub(crate) target_platform: TargetPlatform,
+    pub(crate) enable_continue: bool,
+    pub(crate) heap_size: u64,
+    pub(crate) stack_size: u64,
 }
 
 impl Config {
     pub fn try_parse() -> Result<Self> {
         let config = InternalConfig::parse()?;
 
-        let target_platform = if config.target_platform_name.is_none() {
+        let InternalConfig {
+            ir,
+            arch,
+            target_platform_name,
+            enable_continue,
+            heap_size,
+            stack_size,
+        } = config;
+
+        let target_platform = if target_platform_name.is_none() {
             TargetPlatform::native()
         } else {
-            let platform_name = match config.target_platform_name.as_deref() {
+            let platform_name = match target_platform_name.as_deref() {
                 Some("linux") => PlatformName::Linux,
                 Some("win" | "windows") => PlatformName::Windows,
                 Some(target_platform) => Err(Error::msg(format!(
@@ -52,7 +62,7 @@ impl Config {
                 )))?,
                 _ => unreachable!(),
             };
-            let arch = match config.arch.as_deref() {
+            let arch = match arch.as_deref() {
                 None => TargetPlatform::default().arch,
                 Some("x86-64" | "x64" | "x86_64" | "amd64") => Arch::x86_64,
                 Some(arch) => Err(Error::msg(format!(
@@ -66,11 +76,11 @@ impl Config {
         };
 
         Ok(Self {
-            ir: config.ir,
+            ir,
             target_platform,
-            enable_continue: config.enable_continue,
-            heap: config.heap,
-            stack: config.stack,
+            enable_continue,
+            heap_size,
+            stack_size,
         })
     }
 }

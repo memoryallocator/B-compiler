@@ -17,7 +17,7 @@ use utils::{LINUX_64, WIN_64};
 mod std_linux_64;
 mod std_win_64;
 
-pub(crate) struct MachineCodeGenerator<'a> {
+pub struct MachineCodeGenerator<'a> {
     pub(crate) compiler_options: CompilerOptions,
     intermediate_code: &'a [IntermRepr],
     pooled_strings: HashMap<String, u64>,
@@ -78,7 +78,7 @@ fn declare_word_directive(word_size: u8) -> &'static str {
 }
 
 impl<'a> MachineCodeGenerator<'a> {
-    pub(crate) fn new(
+    pub fn new(
         compiler_options: CompilerOptions,
         intermediate_code: &'a [IntermRepr],
         pooled_strings: HashMap<String, u64>,
@@ -90,7 +90,7 @@ impl<'a> MachineCodeGenerator<'a> {
         }
     }
 
-    pub(crate) fn run(self) -> Vec<String> {
+    pub fn run(self) -> Vec<String> {
         match self.compiler_options.target_platform.arch {
             Arch::x86_64 => self.generate_x86_64(),
         }

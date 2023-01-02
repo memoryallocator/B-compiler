@@ -8,10 +8,10 @@ use utils::{CompilerOptions, Issue, ReservedSymbolsTable};
 
 pub mod token;
 
-pub(crate) struct Tokenizer<'a> {
-    pub(crate) escape_sequences: &'a HashMap<String, String>,
-    pub(crate) reserved_symbols: &'a ReservedSymbolsTable,
-    pub(crate) compiler_options: CompilerOptions,
+pub struct Tokenizer<'a> {
+    pub escape_sequences: &'a HashMap<String, String>,
+    pub reserved_symbols: &'a ReservedSymbolsTable,
+    pub compiler_options: CompilerOptions,
 }
 
 fn parse_assign_binary_operator(s: &str) -> Option<(RichBinaryOperation, usize)> {
@@ -237,7 +237,7 @@ impl Tokenizer<'_> {
                     if name_len > 0 {
                         if let Some(keyword) = self.reserved_symbols.get(&name) {
                             if *keyword == ReservedName::CtrlStmt(CtrlStmtIdent::Continue)
-                                && !self.compiler_options.continue_is_enabled
+                                && !self.compiler_options.enable_continue
                             {
                                 res.push(Token {
                                     token: WrappedToken::Name(name),
@@ -332,11 +332,7 @@ impl Tokenizer<'_> {
         Ok(res)
     }
 
-    pub(crate) fn run(
-        &self,
-        source_code: &str,
-        issues: &mut Vec<Issue>,
-    ) -> Result<Vec<Token>, String> {
+    pub fn run(&self, source_code: &str, issues: &mut Vec<Issue>) -> Result<Vec<Token>, String> {
         self.tokenize(source_code, issues)
     }
 }

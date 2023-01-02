@@ -54,8 +54,8 @@ pub(crate) type LocalScope = HashMap<String, DeclInfoAndPos>;
 pub(crate) type GlobalDefinitions = HashMap<String, DefInfoAndPos>;
 
 #[derive(Debug)]
-pub(crate) struct ScopeTable {
-    pub(crate) global: GlobalDefinitions,
+pub struct ScopeTable {
+    pub global: GlobalDefinitions,
     pub(crate) local: Vec<(FlatNodeAndPos, LocalScope)>,
 }
 
